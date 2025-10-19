@@ -51,21 +51,23 @@ class ContentSummarizer:
                 raise ValueError("OpenAI API key not found. Set OPENAI_API_KEY environment variable.")
             self.client = OpenAI(api_key=self.api_key)
 
-    def summarize(self, transcript: str, video_metadata: Dict[str, any]) -> Dict[str, str]:
+    def summarize(self, transcript: str, video_metadata: Dict[str, any],
+                  analysis_mode: str = "advanced") -> Dict[str, str]:
         """
         Generate a comprehensive summary and notes from a transcript.
 
         Args:
             transcript: Video transcript text
             video_metadata: Dictionary containing video information
+            analysis_mode: "basic" or "advanced" (default: "advanced")
 
         Returns:
             Dictionary containing summary, key points, and notes
         """
-        print(f"[*] Generating summary using {self.model}")
+        print(f"[*] Generating summary using {self.model} ({analysis_mode} mode)")
 
         # Create the prompt
-        prompt = self._create_summary_prompt(transcript, video_metadata)
+        prompt = self._create_summary_prompt(transcript, video_metadata, analysis_mode)
 
         try:
             # Call appropriate API based on model type
@@ -74,7 +76,7 @@ class ContentSummarizer:
                     model=self.model,
                     max_tokens=4000,
                     temperature=0.7,
-                    system="You are an expert at analyzing video content and creating comprehensive, well-structured summaries and notes. You extract key insights, main topics, and important details in a clear, organized manner.",
+                    system="You are an expert at analyzing video and podcast content, creating comprehensive, well-structured summaries and notes. You excel at identifying speakers, capturing conversational nuances, extracting key insights, and organizing information clearly. You notice tone, emphasis, and the flow of discussions.",
                     messages=[
                         {
                             "role": "user",
@@ -91,7 +93,7 @@ class ContentSummarizer:
                     "messages": [
                         {
                             "role": "system",
-                            "content": "You are an expert at analyzing video content and creating comprehensive, well-structured summaries and notes. You extract key insights, main topics, and important details in a clear, organized manner."
+                            "content": "You are an expert at analyzing video and podcast content, creating comprehensive, well-structured summaries and notes. You excel at identifying speakers, capturing conversational nuances, extracting key insights, and organizing information clearly. You notice tone, emphasis, and the flow of discussions."
                         },
                         {
                             "role": "user",
@@ -132,33 +134,38 @@ class ContentSummarizer:
         except Exception as e:
             raise Exception(f"Summarization failed: {str(e)}")
 
-    def _create_summary_prompt(self, transcript: str, metadata: Dict[str, any]) -> str:
-        """Create the prompt for GPT."""
-        return f"""Please analyze this YouTube video transcript and create a comprehensive summary with the following sections:
+    def _create_summary_prompt(self, transcript: str, metadata: Dict[str, any],
+                               analysis_mode: str = "advanced") -> str:
+        """
+        Create the prompt for GPT by loading from external file.
 
-**Video Information:**
-- Title: {metadata.get('title', 'Unknown')}
-- Channel: {metadata.get('uploader', 'Unknown')}
-- Duration: {self._format_duration(metadata.get('duration', 0))}
+        Args:
+            transcript: Transcript text
+            metadata: Video metadata
+            analysis_mode: "basic" or "advanced"
 
-**Transcript:**
-{transcript}
+        Returns:
+            Formatted prompt string
+        """
+        # Determine prompt file path
+        prompt_file = Path(__file__).parent.parent / "docs" / f"analysis_{analysis_mode}.md"
 
-**Please provide:**
+        if not prompt_file.exists():
+            raise FileNotFoundError(f"Analysis prompt file not found: {prompt_file}")
 
-1. **Executive Summary** (2-3 sentences): A brief overview of what the video is about.
+        # Load prompt template from file
+        with open(prompt_file, 'r', encoding='utf-8') as f:
+            template = f.read()
 
-2. **Key Topics & Main Points**: List the main topics discussed with bullet points.
+        # Replace placeholders
+        prompt = template.format(
+            title=metadata.get('title', 'Unknown'),
+            uploader=metadata.get('uploader', 'Unknown'),
+            duration=self._format_duration(metadata.get('duration', 0)),
+            transcript=transcript
+        )
 
-3. **Detailed Notes**: Organize the content into logical sections with subheadings. Include important details, examples, and explanations.
-
-4. **Key Takeaways**: List 3-5 most important insights or lessons from the video.
-
-5. **Actionable Items** (if applicable): Any specific actions, recommendations, or steps mentioned.
-
-6. **Additional Notes**: Any other relevant information, resources mentioned, or context.
-
-Format your response in clear Markdown with proper headings and bullet points."""
+        return prompt
 
     def _format_output(self, summary: str, metadata: Dict[str, any]) -> str:
         """Format the final output with metadata header."""
