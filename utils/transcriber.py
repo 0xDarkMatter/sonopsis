@@ -1,6 +1,6 @@
 """
 Audio Transcription Module
-Transcribes audio files using OpenAI's Whisper model.
+Transcribes audio files using OpenAI's Whisper or WhisperX with speaker diarization.
 """
 
 import os
@@ -16,29 +16,43 @@ from colorama import Fore, Style
 
 
 class AudioTranscriber:
-    """Handles audio transcription using Whisper."""
+    """Handles audio transcription using Whisper or WhisperX."""
 
-    def __init__(self, model_name: str = "base", output_dir: str = "transcripts"):
+    def __init__(self, model_name: str = "base", output_dir: str = "transcripts",
+                 use_whisperx: bool = False, hf_token: Optional[str] = None):
         """
         Initialize the transcriber.
 
         Args:
             model_name: Whisper model size (tiny, base, small, medium, large)
             output_dir: Directory to save transcripts
+            use_whisperx: If True, use WhisperX with speaker diarization (requires HF token)
+            hf_token: Hugging Face token for speaker diarization (required if use_whisperx=True)
         """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self._stop_progress = False
+        self.use_whisperx = use_whisperx
+        self.model_name = model_name
+        self.hf_token = hf_token or os.getenv("HF_TOKEN")
 
         # Use custom Whisper cache location on E: drive
         # This allows sharing models across all projects without using C: drive space
         whisper_cache = os.getenv("WHISPER_CACHE_DIR", "E:/Coding/WhisperCache")
         os.makedirs(whisper_cache, exist_ok=True)
 
-        print(f"[*] Loading Whisper model: {model_name}")
-        print(f"[*] Model cache: {whisper_cache}")
-        self.model = whisper.load_model(model_name, download_root=whisper_cache)
-        print(f"[+] Model loaded successfully")
+        if use_whisperx:
+            print(f"[*] Using WhisperX with speaker diarization")
+            if not self.hf_token:
+                print(f"{Fore.YELLOW}[!] Warning: No HF_TOKEN found. Speaker diarization will be disabled.{Style.RESET_ALL}")
+                print(f"{Fore.YELLOW}    Set HF_TOKEN environment variable or pass hf_token parameter.{Style.RESET_ALL}")
+            # WhisperX models are loaded per-transcription for efficiency
+            print(f"[+] WhisperX initialized (model will load on first use)")
+        else:
+            print(f"[*] Loading Whisper model: {model_name}")
+            print(f"[*] Model cache: {whisper_cache}")
+            self.model = whisper.load_model(model_name, download_root=whisper_cache)
+            print(f"[+] Model loaded successfully")
 
     def _get_audio_duration(self, audio_file: str) -> float:
         """Get duration of audio file in seconds using ffprobe."""
@@ -131,6 +145,14 @@ class AudioTranscriber:
             # Fallback for console encoding issues
             print(f"[*] Transcribing audio file...")
 
+        # Route to appropriate transcription method
+        if self.use_whisperx:
+            return self._transcribe_whisperx(audio_path, language, podcast_mode)
+        else:
+            return self._transcribe_vanilla(audio_path, language, podcast_mode)
+
+    def _transcribe_vanilla(self, audio_path: Path, language: Optional[str], podcast_mode: bool) -> Dict[str, any]:
+        """Transcribe using vanilla Whisper."""
         try:
             # Get audio duration for progress estimation
             duration = self._get_audio_duration(str(audio_path))
@@ -220,25 +242,118 @@ class AudioTranscriber:
         except Exception as e:
             raise Exception(f"Transcription failed: {str(e)}")
 
-    def transcribe_with_timestamps(self, audio_file: str) -> str:
-        """
-        Create a formatted transcript with timestamps.
+    def _transcribe_whisperx(self, audio_path: Path, language: Optional[str], podcast_mode: bool) -> Dict[str, any]:
+        """Transcribe using WhisperX with speaker diarization."""
+        try:
+            import whisperx
+            import torch
 
-        Args:
-            audio_file: Path to audio file
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            compute_type = "float16" if device == "cuda" else "int8"
 
-        Returns:
-            Formatted transcript string with timestamps
-        """
-        result = self.transcribe(audio_file)
+            print(f"[*] Using device: {device}")
 
-        formatted_lines = []
-        for segment in result['segments']:
-            start_time = self._format_timestamp(segment['start'])
-            end_time = self._format_timestamp(segment['end'])
-            formatted_lines.append(f"[{start_time} -> {end_time}] {segment['text']}")
+            # Get audio duration for progress estimation
+            duration = self._get_audio_duration(str(audio_path))
 
-        return '\n'.join(formatted_lines)
+            # Start progress bar in separate thread
+            self._stop_progress = False
+            progress_thread = None
+            if duration > 0:
+                progress_thread = threading.Thread(target=self._show_progress, args=(duration,))
+                progress_thread.daemon = True
+                progress_thread.start()
+
+            # Load model
+            model = whisperx.load_model(self.model_name, device, compute_type=compute_type)
+
+            # Transcribe
+            audio = whisperx.load_audio(str(audio_path))
+            result = model.transcribe(audio, batch_size=16)
+
+            # Stop progress bar
+            self._stop_progress = True
+            if progress_thread:
+                progress_thread.join(timeout=1)
+
+            # Clear the line
+            sys.stdout.write(f"\r{Fore.CYAN}{'━' * 80}\n{Style.RESET_ALL}")
+            sys.stdout.flush()
+
+            # Align whisper output
+            print(f"[*] Aligning transcript...")
+            model_a, metadata = whisperx.load_align_model(language_code=result["language"], device=device)
+            result = whisperx.align(result["segments"], model_a, metadata, audio, device, return_char_alignments=False)
+
+            # Perform speaker diarization if HF token is available
+            if self.hf_token:
+                print(f"[*] Performing speaker diarization...")
+                diarize_model = whisperx.DiarizationPipeline(use_auth_token=self.hf_token, device=device)
+                diarize_segments = diarize_model(audio)
+                result = whisperx.assign_word_speakers(diarize_segments, result)
+
+            print()  # Space below
+
+            # Format transcript with speaker labels
+            transcript_lines = []
+            current_speaker = None
+            current_text = []
+
+            for segment in result.get("segments", []):
+                speaker = segment.get("speaker", "UNKNOWN")
+                text = segment.get("text", "").strip()
+
+                if speaker != current_speaker:
+                    # New speaker - save previous and start new
+                    if current_text:
+                        transcript_lines.append(f"**[{current_speaker}]** {' '.join(current_text)}\n")
+                    current_speaker = speaker
+                    current_text = [text]
+                else:
+                    # Same speaker - continue
+                    current_text.append(text)
+
+            # Add final segment
+            if current_text:
+                transcript_lines.append(f"**[{current_speaker}]** {' '.join(current_text)}\n")
+
+            plain_text = '\n'.join(transcript_lines)
+
+            # Create markdown header with metadata
+            speakers_info = "With speaker diarization" if self.hf_token else "No speaker labels"
+            markdown_content = f"""# Transcript
+
+**Language:** {result.get("language", "unknown")}
+**Duration:** {self._format_timestamp(duration)}
+**Speakers:** {speakers_info}
+
+---
+
+{plain_text}
+"""
+
+            # Save as Markdown file
+            md_file = self.output_dir / f"{audio_path.stem}_transcript.md"
+            with open(md_file, 'w', encoding='utf-8') as f:
+                f.write(markdown_content)
+
+            print(f"[+] Transcription complete")
+            print(f"Detected language: {result.get('language', 'unknown')}")
+            if self.hf_token:
+                print(f"[+] Speaker diarization complete")
+            try:
+                print(f"[*] Saved to: {md_file}")
+            except UnicodeEncodeError:
+                print(f"[*] Files saved to transcripts directory")
+
+            return {
+                'text': plain_text,
+                'language': result.get("language", "unknown"),
+                'text_file': str(md_file)
+            }
+
+        except Exception as e:
+            raise Exception(f"WhisperX transcription failed: {str(e)}")
 
     @staticmethod
     def _format_timestamp(seconds: float) -> str:

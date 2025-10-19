@@ -6,6 +6,9 @@ openai-whisper>=20231117
 torch>=2.0.0
 torchaudio>=2.0.0
 
+# Optional: WhisperX with speaker diarization (requires HF token)
+# whisperx>=3.7.0
+
 # AI summarization
 openai>=1.0.0
 anthropic>=0.18.0
@@ -13,6 +16,3 @@ anthropic>=0.18.0
 # Utility libraries
 python-dotenv>=1.0.0
 colorama>=0.4.6
-
-# Optional: faster whisper implementation
-# faster-whisper>=0.10.0
