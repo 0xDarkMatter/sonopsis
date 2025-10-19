@@ -8,10 +8,11 @@ import sys
 import time
 import whisper
 import threading
+import subprocess
+import json
 from pathlib import Path
 from typing import Dict, Optional
 from colorama import Fore, Style
-from pydub.utils import mediainfo
 
 
 class AudioTranscriber:
@@ -40,12 +41,30 @@ class AudioTranscriber:
         print(f"[+] Model loaded successfully")
 
     def _get_audio_duration(self, audio_file: str) -> float:
-        """Get duration of audio file in seconds."""
+        """Get duration of audio file in seconds using ffprobe."""
         try:
-            info = mediainfo(audio_file)
-            return float(info.get('duration', 0))
+            # Use ffprobe to get audio duration
+            result = subprocess.run(
+                [
+                    'ffprobe',
+                    '-v', 'quiet',
+                    '-print_format', 'json',
+                    '-show_format',
+                    audio_file
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                duration = float(data.get('format', {}).get('duration', 0))
+                return duration
         except:
-            return 0
+            pass
+
+        return 0
 
     def _show_progress(self, duration: float):
         """Show progress bar during transcription with cyan styling."""

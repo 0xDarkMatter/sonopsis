@@ -13,7 +13,6 @@ anthropic>=0.18.0
 # Utility libraries
 python-dotenv>=1.0.0
 colorama>=0.4.6
-pydub>=0.25.1
 
 # Optional: faster whisper implementation
 # faster-whisper>=0.10.0
