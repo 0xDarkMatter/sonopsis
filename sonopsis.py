@@ -9,6 +9,15 @@ from pathlib import Path
 from dotenv import load_dotenv
 from colorama import init, Fore, Style
 
+# Set UTF-8 encoding for Windows console
+if sys.platform == 'win32':
+    os.environ['PYTHONIOENCODING'] = 'utf-8'
+    # Reconfigure stdout/stderr for UTF-8
+    import io
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
 from utils.downloader import YouTubeDownloader
 from utils.transcriber import AudioTranscriber
 from utils.summarizer import ContentSummarizer
@@ -18,6 +27,52 @@ init(autoreset=True)
 
 # Load environment variables
 load_dotenv()
+
+
+def print_banner():
+    """Print application banner with border - Claude Code style."""
+    width = 100
+    title = "Sonopsis v1.0"
+
+    # Top border with title
+    title_padding = width - len(title) - 5
+    border_top = f"╭─── {title} " + "─" * title_padding + "╮"
+
+    # ASCII logo lines with padding of 2 spaces
+    logo_lines = [
+        "███████╗ ██████╗ ███╗   ██╗ ██████╗ ██████╗ ███████╗██╗███████╗",
+        "██╔════╝██╔═══██╗████╗  ██║██╔═══██╗██╔══██╗██╔════╝██║██╔════╝",
+        "███████╗██║   ██║██╔██╗ ██║██║   ██║██████╔╝███████╗██║███████╗",
+        "╚════██║██║   ██║██║╚██╗██║██║   ██║██╔═══╝ ╚════██║██║╚════██║",
+        "███████║╚██████╔╝██║ ╚████║╚██████╔╝██║     ███████║██║███████║",
+        "╚══════╝ ╚═════╝ ╚═╝  ╚═══╝ ╚═════╝ ╚═╝     ╚══════╝╚═╝╚══════╝"
+    ]
+
+    # Text to display on the right of logo
+    text_lines = [
+        "",
+        "",
+        "Sonopsis v1.0",
+        "Video/Audio Summariser",
+        "",
+        ""
+    ]
+
+    print(f"\n{Fore.CYAN}{border_top}")
+    print(f"{Fore.CYAN}│{' ' * width}│")
+
+    # Print logo with text on the right side
+    for i, logo_line in enumerate(logo_lines):
+        text = text_lines[i]
+        # Logo is 68 chars, we need: 2 (left pad) + 68 (logo) + 2 (separator) + text + spaces = 100
+        spaces_needed = width - 2 - len(logo_line) - 2 - len(text)
+        print(f"{Fore.CYAN}│  {logo_line}  {text}{' ' * spaces_needed}│{Style.RESET_ALL}")
+
+    print(f"{Fore.CYAN}│{' ' * width}│")
+
+    # Bottom border
+    border_bottom = "╰" + "─" * width + "╯"
+    print(f"{Fore.CYAN}{border_bottom}{Style.RESET_ALL}\n")
 
 
 def print_header():
@@ -32,6 +87,189 @@ def print_section_header(title):
     print(f"\n{Fore.YELLOW}{'-'*70}")
     print(f"{Fore.YELLOW}{title}")
     print(f"{Fore.YELLOW}{'-'*70}{Style.RESET_ALL}\n")
+
+
+def show_menu(title, menu_items, default_selected=0):
+    """Generic menu with keyboard navigation."""
+    import msvcrt
+
+    width = 100
+    selected = default_selected
+
+    # Calculate fixed hover width (longest item + 5 chars)
+    max_item_len = max(len(f"[{i+1}] {item}") for i, item in enumerate(menu_items))
+    hover_width = max_item_len + 5
+
+    # Top border with title
+    title_padding = width - len(title) - 5
+    border_top = f"╭─── {title} " + "─" * title_padding + "╮"
+    border_bottom = "╰" + "─" * width + "╯"
+
+    def render_menu():
+        """Render the menu with current selection."""
+        # Save current position, move to start of first menu item
+        print(f"\0337", end='')  # Save cursor position
+
+        # Move up: from instruction line to first menu item
+        # Layout: border_bottom, empty_line, menu_items..., empty_line, border_top
+        # From instruction to first menu item = border + empty + all menu items
+        num_lines_up = len(menu_items) + 2
+        print(f"\033[{num_lines_up}A\r", end='')  # Move up and to start of line
+
+        # Redraw ONLY the menu items
+        for i, item in enumerate(menu_items):
+            item_text = f"[{i+1}] {item}"
+            if i == selected:
+                # Black text on cyan background
+                highlight_spaces = hover_width - len(item_text)
+                remaining_spaces = width - hover_width - 2
+                print(f"{Fore.CYAN}│  \033[30m\033[46m{item_text}{' ' * highlight_spaces}\033[0m{Fore.CYAN}{' ' * remaining_spaces}│{Style.RESET_ALL}")
+            else:
+                spaces = width - len(item_text) - 2
+                print(f"{Fore.CYAN}│  {item_text}{' ' * spaces}│{Style.RESET_ALL}")
+
+        # Restore cursor position
+        print(f"\0338", end='', flush=True)
+
+    # Initial render
+    print(f"\n{Fore.CYAN}{border_top}")
+    print(f"{Fore.CYAN}│{' ' * width}│")
+    for i, item in enumerate(menu_items):
+        item_text = f"[{i+1}] {item}"
+        if i == selected:
+            # Black text on cyan background
+            highlight_spaces = hover_width - len(item_text)
+            remaining_spaces = width - hover_width - 2
+            print(f"{Fore.CYAN}│  \033[30m\033[46m{item_text}{' ' * highlight_spaces}\033[0m{Fore.CYAN}{' ' * remaining_spaces}│{Style.RESET_ALL}")
+        else:
+            spaces = width - len(item_text) - 2
+            print(f"{Fore.CYAN}│  {item_text}{' ' * spaces}│{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}│{' ' * width}│")  # Empty line before border
+    print(f"{Fore.CYAN}{border_bottom}{Style.RESET_ALL}")
+    print(f"{Style.BRIGHT}{Fore.CYAN}Use ↑/↓ arrows or TAB to navigate, ENTER to select{Style.RESET_ALL}", end='', flush=True)
+
+    while True:
+        key = msvcrt.getch()
+
+        if key == b'\xe0':  # Arrow key prefix
+            key = msvcrt.getch()
+            if key == b'H':  # Up arrow
+                selected = (selected - 1) % len(menu_items)
+                render_menu()
+            elif key == b'P':  # Down arrow
+                selected = (selected + 1) % len(menu_items)
+                render_menu()
+        elif key == b'\t':  # Tab
+            selected = (selected + 1) % len(menu_items)
+            render_menu()
+        elif key == b'\r':  # Enter
+            print()  # New line after selection
+            return selected
+        elif key.isdigit():  # Direct number selection
+            num = int(key.decode()) - 1
+            if 0 <= num < len(menu_items):
+                print()
+                return num
+
+
+def show_main_menu():
+    """Display main menu."""
+    menu_items = [
+        "Process single video",
+        "Process playlist",
+        "Exit"
+    ]
+    return show_menu("Main Menu", menu_items)
+
+
+def select_whisper_model_menu():
+    """Interactive Whisper model selection menu."""
+    menu_items = [
+        "tiny - Fast, 75MB, Good quality",
+        "base - Recommended, 150MB, Better quality",
+        "small - Medium speed, 500MB, Great quality",
+        "medium - Slow, 1.5GB, Excellent quality",
+        "large - Slowest, 3GB, Best quality"
+    ]
+    selected = show_menu("Select Whisper Model", menu_items, default_selected=1)  # Default to base
+    models = ['tiny', 'base', 'small', 'medium', 'large']
+    return models[selected]
+
+
+def select_analysis_mode_menu():
+    """Interactive analysis mode selection menu."""
+    menu_items = [
+        "Basic - Quick summary with key topics and quotes (5 sections)",
+        "Advanced - Comprehensive analysis with detailed notes (9 sections)"
+    ]
+    selected = show_menu("Select Analysis Mode", menu_items, default_selected=1)  # Default to Advanced
+    modes = ['basic', 'advanced']
+    return modes[selected]
+
+
+def select_summary_model_menu():
+    """Interactive AI model selection menu."""
+    has_openai = bool(os.getenv("OPENAI_API_KEY"))
+    has_anthropic = bool(os.getenv("ANTHROPIC_API_KEY"))
+
+    menu_items = []
+    models = []
+
+    if has_openai:
+        menu_items.append("GPT-4o-mini - Fast, Budget-friendly")
+        models.append('gpt-4o-mini')
+        menu_items.append("GPT-4o - Balanced, Great quality")
+        models.append('gpt-4o')
+        menu_items.append("GPT-5 - PhD-level, Most accurate")
+        models.append('gpt-5')
+
+    if has_anthropic:
+        menu_items.append("Claude Haiku 4.5 - Best value, Fast")
+        models.append('claude-haiku-4-5-20251001')
+        menu_items.append("Claude Sonnet 4.5 - Top quality")
+        models.append('claude-sonnet-4-5-20250929')
+
+    if not menu_items:
+        print(f"{Fore.MAGENTA}No API keys found! Please add OPENAI_API_KEY or ANTHROPIC_API_KEY to .env{Style.RESET_ALL}")
+        sys.exit(1)
+
+    # Default to Claude Haiku if available, otherwise first option
+    default_idx = 0
+    if has_anthropic:
+        for i, model in enumerate(models):
+            if 'haiku' in model:
+                default_idx = i
+                break
+
+    selected = show_menu("Select AI Model", menu_items, default_selected=default_idx)
+    return models[selected]
+
+
+def get_youtube_url_menu():
+    """Get YouTube URL from user with styled prompt."""
+    width = 100
+    title = "Enter YouTube URL"
+
+    title_padding = width - len(title) - 5
+    border_top = f"╭─── {title} " + "─" * title_padding + "╮"
+    border_bottom = "╰" + "─" * width + "╯"
+
+    print(f"\n{Fore.CYAN}{border_top}")
+    print(f"{Fore.CYAN}│{' ' * width}│")
+    print(f"{Fore.CYAN}│  Enter the YouTube video or playlist URL:{' ' * 58}│")
+    print(f"{Fore.CYAN}│{' ' * width}│")
+    print(f"{Fore.CYAN}{border_bottom}{Style.RESET_ALL}\n")
+
+    while True:
+        url = input(f"{Fore.CYAN}URL: {Style.RESET_ALL}").strip()
+
+        if url.lower() == 'q':
+            sys.exit(0)
+
+        if 'youtube.com' in url or 'youtu.be' in url:
+            return url
+
+        print(f"{Fore.MAGENTA}Invalid URL. Please enter a valid YouTube URL.{Style.RESET_ALL}")
 
 
 def get_youtube_url():
@@ -243,27 +481,27 @@ def select_summary_model():
         print(f"{Fore.RED}[!] Invalid choice. Please enter 1-{len(models)}.{Style.RESET_ALL}")
 
 
-def process_single_video(url, whisper_model, summary_model, keep_files, video_num=None, total_videos=None):
+def process_single_video(url, whisper_model, summary_model, analysis_mode, keep_files, download_video=False, video_num=None, total_videos=None):
     """Process a single video with selected models."""
 
     # Add video counter to header if processing multiple videos
     if video_num and total_videos:
-        print(f"\n{Fore.MAGENTA}{'='*70}")
-        print(f"{Fore.MAGENTA}  Processing Video {video_num}/{total_videos}")
-        print(f"{Fore.MAGENTA}{'='*70}{Style.RESET_ALL}\n")
+        print(f"\n{Fore.CYAN}{'='*70}")
+        print(f"{Fore.CYAN}  Processing Video {video_num}/{total_videos}")
+        print(f"{Fore.CYAN}{'='*70}{Style.RESET_ALL}\n")
 
     try:
         # Step 1: Download
-        print(f"{Fore.CYAN}[1/3] Downloading video...{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}[1/3] Downloading {'video' if download_video else 'audio'}...{Style.RESET_ALL}")
         downloader = YouTubeDownloader(output_dir="downloads")
-        video_data = downloader.download_video(url, audio_only=True)
-        print(f"{Fore.GREEN}[+] Download complete{Style.RESET_ALL}\n")
+        video_data = downloader.download_video(url, audio_only=not download_video)
+        print(f"{Fore.CYAN}[+] Download complete{Style.RESET_ALL}\n")
 
         # Step 2: Transcribe
         print(f"{Fore.CYAN}[2/3] Transcribing audio with {whisper_model} model...{Style.RESET_ALL}")
         transcriber = AudioTranscriber(model_name=whisper_model, output_dir="transcripts")
         transcript_data = transcriber.transcribe(video_data['audio_file'])
-        print(f"{Fore.GREEN}[+] Transcription complete ({transcript_data['language']}){Style.RESET_ALL}\n")
+        print(f"{Fore.CYAN}[+] Transcription complete ({transcript_data['language']}){Style.RESET_ALL}\n")
 
         # Step 3: Summarize
         print(f"{Fore.CYAN}[3/3] Generating summary with {summary_model}...{Style.RESET_ALL}")
@@ -276,28 +514,28 @@ def process_single_video(url, whisper_model, summary_model, keep_files, video_nu
             'url': video_data['url']
         }
 
-        summary_data = summarizer.summarize(transcript_data['text'], metadata)
-        print(f"{Fore.GREEN}[+] Summary complete{Style.RESET_ALL}\n")
+        summary_data = summarizer.summarize(transcript_data['text'], metadata, analysis_mode)
+        print(f"{Fore.CYAN}[+] Summary complete{Style.RESET_ALL}\n")
 
         # Cleanup
         if not keep_files:
             audio_file = Path(video_data['audio_file'])
             if audio_file.exists():
                 audio_file.unlink()
-                print(f"{Fore.YELLOW}[*] Cleaned up audio file{Style.RESET_ALL}\n")
+                print(f"{Fore.CYAN}[*] Cleaned up files{Style.RESET_ALL}\n")
 
         # Print results
-        print(f"\n{Fore.GREEN}{'='*70}")
-        print(f"{Fore.GREEN}Video Processing Complete!{Style.RESET_ALL}")
-        print(f"{Fore.GREEN}{'='*70}\n")
+        print(f"\n{Fore.CYAN}{'='*70}")
+        print(f"{Fore.CYAN}Video Processing Complete!{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}{'='*70}\n")
 
         try:
-            print(f"{Fore.WHITE}Video:{Style.RESET_ALL} {video_data['title']}")
+            print(f"{Fore.CYAN}Video:{Style.RESET_ALL} {video_data['title']}")
         except UnicodeEncodeError:
-            print(f"{Fore.WHITE}Video:{Style.RESET_ALL} [Title with special characters]")
+            print(f"{Fore.CYAN}Video:{Style.RESET_ALL} [Title with special characters]")
 
-        print(f"{Fore.WHITE}Transcript:{Style.RESET_ALL} {transcript_data['text_file']}")
-        print(f"{Fore.WHITE}Summary:{Style.RESET_ALL} {summary_data['output_file']}\n")
+        print(f"{Fore.CYAN}Transcript:{Style.RESET_ALL} {transcript_data['text_file']}")
+        print(f"{Fore.CYAN}Summary:{Style.RESET_ALL} {summary_data['output_file']}\n")
 
         return {
             'success': True,
@@ -308,7 +546,7 @@ def process_single_video(url, whisper_model, summary_model, keep_files, video_nu
         }
 
     except Exception as e:
-        print(f"{Fore.RED}[!] Error processing video: {str(e)}{Style.RESET_ALL}\n")
+        print(f"{Fore.MAGENTA}[!] Error processing video: {str(e)}{Style.RESET_ALL}\n")
         return {
             'success': False,
             'url': url,
@@ -316,31 +554,30 @@ def process_single_video(url, whisper_model, summary_model, keep_files, video_nu
         }
 
 
-def process_playlist(url, whisper_model, summary_model, keep_files):
+def process_playlist(url, whisper_model, summary_model, analysis_mode, keep_files, download_video=False):
     """Process all videos in a playlist."""
-    print_section_header("Step 4: Processing Playlist")
-
     try:
         # Get playlist videos
         downloader = YouTubeDownloader(output_dir="downloads")
         videos = downloader.get_playlist_videos(url)
 
         if not videos:
-            print(f"{Fore.RED}[!] No videos found in playlist{Style.RESET_ALL}")
+            print(f"{Fore.CYAN}[!] No videos found in playlist{Style.RESET_ALL}")
             return False
 
         # Show playlist summary
         print(f"\n{Fore.CYAN}{'='*70}")
         print(f"{Fore.CYAN}  PLAYLIST SUMMARY")
         print(f"{Fore.CYAN}{'='*70}{Style.RESET_ALL}\n")
-        print(f"{Fore.WHITE}Total videos:{Style.RESET_ALL} {len(videos)}")
-        print(f"{Fore.WHITE}Whisper model:{Style.RESET_ALL} {whisper_model}")
-        print(f"{Fore.WHITE}AI model:{Style.RESET_ALL} {summary_model}\n")
+        print(f"{Fore.CYAN}Total videos: {len(videos)}")
+        print(f"{Fore.CYAN}Whisper model: {whisper_model}")
+        print(f"{Fore.CYAN}AI model: {summary_model}")
+        print(f"{Fore.CYAN}Analysis mode: {analysis_mode}\n")
 
         # Ask for confirmation
-        confirm = input(f"{Fore.YELLOW}Process all {len(videos)} videos? (y/N): {Style.RESET_ALL}").strip().lower()
+        confirm = input(f"{Fore.CYAN}Process all {len(videos)} videos? (y/N): {Style.RESET_ALL}").strip().lower()
         if confirm != 'y':
-            print(f"{Fore.YELLOW}[*] Cancelled{Style.RESET_ALL}")
+            print(f"{Fore.CYAN}[*] Cancelled{Style.RESET_ALL}")
             return False
 
         # Process each video
@@ -350,15 +587,17 @@ def process_playlist(url, whisper_model, summary_model, keep_files):
 
         for idx, video in enumerate(videos, 1):
             try:
-                print(f"\n{Fore.WHITE}Video Title:{Style.RESET_ALL} {video['title']}")
+                print(f"\n{Fore.CYAN}Video Title: {video['title']}{Style.RESET_ALL}")
             except UnicodeEncodeError:
-                print(f"\n{Fore.WHITE}Video Title:{Style.RESET_ALL} [Title with special characters]")
+                print(f"\n{Fore.CYAN}Video Title: [Title with special characters]{Style.RESET_ALL}")
 
             result = process_single_video(
                 video['url'],
                 whisper_model,
                 summary_model,
+                analysis_mode,
                 keep_files,
+                download_video,
                 video_num=idx,
                 total_videos=len(videos)
             )
@@ -375,12 +614,12 @@ def process_playlist(url, whisper_model, summary_model, keep_files):
         print(f"{Fore.CYAN}  PLAYLIST PROCESSING COMPLETE!")
         print(f"{Fore.CYAN}{'='*70}{Style.RESET_ALL}\n")
 
-        print(f"{Fore.GREEN}Successful:{Style.RESET_ALL} {successful}/{len(videos)}")
+        print(f"{Fore.CYAN}Successful: {successful}/{len(videos)}")
         if failed > 0:
-            print(f"{Fore.RED}Failed:{Style.RESET_ALL} {failed}/{len(videos)}\n")
+            print(f"{Fore.CYAN}Failed: {failed}/{len(videos)}\n")
 
             # Show failed videos
-            print(f"{Fore.RED}Failed videos:{Style.RESET_ALL}")
+            print(f"{Fore.CYAN}Failed videos:{Style.RESET_ALL}")
             for result in results:
                 if not result['success']:
                     print(f"  - {result['url']}")
@@ -389,47 +628,59 @@ def process_playlist(url, whisper_model, summary_model, keep_files):
         return True
 
     except Exception as e:
-        print(f"{Fore.RED}[!] Error processing playlist: {str(e)}{Style.RESET_ALL}")
+        print(f"{Fore.MAGENTA}[!] Error processing playlist: {str(e)}{Style.RESET_ALL}")
         return False
 
 
 def main():
     """Main interactive interface."""
-    print_header()
+    print_banner()
 
-    # Get inputs
-    url = get_youtube_url()
+    while True:
+        # Step 1: Main menu
+        choice = show_main_menu()
 
-    # Check if it's a playlist
-    downloader = YouTubeDownloader(output_dir="downloads")
-    is_playlist = downloader.is_playlist(url)
-
-    if is_playlist:
-        print(f"\n{Fore.YELLOW}[*] Detected: YouTube Playlist{Style.RESET_ALL}")
-    else:
-        print(f"\n{Fore.YELLOW}[*] Detected: Single Video{Style.RESET_ALL}")
-
-    whisper_model = select_whisper_model()
-    summary_model = select_summary_model()
-
-    # Ask about keeping files
-    keep = input(f"\n{Fore.WHITE}Keep downloaded audio files? (y/N): {Style.RESET_ALL}").strip().lower()
-    keep_files = keep == 'y'
-
-    # Process based on type
-    if is_playlist:
-        success = process_playlist(url, whisper_model, summary_model, keep_files)
-    else:
-        result = process_single_video(url, whisper_model, summary_model, keep_files)
-        success = result['success']
-
-    if success:
-        # Ask if user wants to process another
-        again = input(f"\n{Fore.WHITE}Process another video/playlist? (y/N): {Style.RESET_ALL}").strip().lower()
-        if again == 'y':
-            main()
-        else:
+        if choice == 2:  # Exit (index 2 = third option)
             print(f"\n{Fore.CYAN}Thanks for using Sonopsis!{Style.RESET_ALL}\n")
+            sys.exit(0)
+
+        # Step 2: Select Whisper model
+        whisper_model = select_whisper_model_menu()
+
+        # Step 3: Select AI model
+        summary_model = select_summary_model_menu()
+
+        # Step 4: Select analysis mode
+        analysis_mode = select_analysis_mode_menu()
+
+        # Step 5: Get YouTube URL
+        url = get_youtube_url_menu()
+
+        # Verify the URL type matches choice
+        downloader = YouTubeDownloader(output_dir="downloads")
+        is_playlist = downloader.is_playlist(url)
+
+        if choice == 0 and is_playlist:  # Selected single video but got playlist
+            print(f"\n{Fore.MAGENTA}This is a playlist URL, but you selected single video. Please try again.{Style.RESET_ALL}\n")
+            continue
+        elif choice == 1 and not is_playlist:  # Selected playlist but got single video
+            print(f"\n{Fore.MAGENTA}This is a single video URL, but you selected playlist. Please try again.{Style.RESET_ALL}\n")
+            continue
+
+        # Step 6: Ask about keeping files and video option
+        keep_menu = ["Keep audio only", "Keep video file", "Delete all after processing"]
+        keep_choice = show_menu("File Options?", keep_menu, default_selected=2)
+        keep_files = (keep_choice != 2)
+        download_video = (keep_choice == 1)
+
+        # Process based on type
+        print(f"\n{Fore.CYAN}Starting processing...{Style.RESET_ALL}\n")
+        if is_playlist:
+            process_playlist(url, whisper_model, summary_model, analysis_mode, keep_files, download_video)
+        else:
+            process_single_video(url, whisper_model, summary_model, analysis_mode, keep_files, download_video)
+
+        print(f"\n{Fore.CYAN}{'─' * 70}{Style.RESET_ALL}\n")
 
 
 if __name__ == "__main__":
