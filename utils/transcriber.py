@@ -185,17 +185,10 @@ class AudioTranscriber:
             sys.stdout.flush()
             print()  # Space below
 
-            # Create timestamped transcript in Markdown format
-            timestamped_lines = []
-            for seg in result['segments']:
-                start_time = self._format_timestamp(seg['start'])
-                end_time = self._format_timestamp(seg['end'])
-                timestamped_lines.append(f"**[{start_time} -> {end_time}]** {seg['text'].strip()}")
-
-            timestamped_text = '\n\n'.join(timestamped_lines)  # Double newline for paragraph spacing
+            # Get clean plain text transcript
             plain_text = result['text'].strip()
 
-            # Create markdown header
+            # Create markdown header with metadata
             markdown_content = f"""# Transcript
 
 **Language:** {result['language']}
@@ -203,7 +196,7 @@ class AudioTranscriber:
 
 ---
 
-{timestamped_text}
+{plain_text}
 """
 
             # Save as Markdown file
@@ -219,8 +212,7 @@ class AudioTranscriber:
                 print(f"[*] Files saved to transcripts directory")
 
             return {
-                'text': timestamped_text,  # Send timestamped version to LLM
-                'plain_text': plain_text,  # Keep plain text available if needed
+                'text': plain_text,  # Send clean text to LLM
                 'language': result['language'],
                 'text_file': str(md_file)
             }
