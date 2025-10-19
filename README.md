@@ -1,16 +1,30 @@
+```
+███████╗ ██████╗ ███╗   ██╗ ██████╗ ██████╗ ███████╗██╗███████╗
+██╔════╝██╔═══██╗████╗  ██║██╔═══██╗██╔══██╗██╔════╝██║██╔════╝
+███████╗██║   ██║██╔██╗ ██║██║   ██║██████╔╝███████╗██║███████╗
+╚════██║██║   ██║██║╚██╗██║██║   ██║██╔═══╝ ╚════██║██║╚════██║
+███████║╚██████╔╝██║ ╚████║╚██████╔╝██║     ███████║██║███████║
+╚══════╝ ╚═════╝ ╚═╝  ╚═══╝ ╚═════╝ ╚═╝     ╚══════╝╚═╝╚══════╝
+```
+
 # Sonopsis
+
+**Video/Audio Summariser** - Download · Transcribe · Summarize
 
 A Python application that downloads YouTube videos, transcribes them using OpenAI's Whisper, and generates comprehensive summaries and notes using GPT/Claude models.
 
 ## Features
 
+- **Interactive Menu Interface**: Beautiful Claude Code-style menus with keyboard navigation
 - **Download YouTube Videos**: Automatically downloads videos and extracts audio
 - **Playlist Batch Processing**: Process entire YouTube playlists with one command
-- **Audio Transcription**: Uses Whisper AI for accurate speech-to-text conversion
-- **AI-Powered Summaries**: Generates well-formatted summaries, key points, and notes using GPT/Claude
-- **Multiple Output Formats**: Saves transcripts as JSON and plain text, summaries as Markdown
-- **Timestamped Transcripts**: Optional timestamp support for detailed analysis
-- **Customizable Models**: Choose different Whisper and AI models based on your needs
+- **Enhanced Audio Transcription**: Uses Whisper AI with optimized prompts for podcast/conversation content
+- **Timestamped Markdown Transcripts**: Bold timestamps with proper formatting for easy reading
+- **Two Analysis Modes**: Choose between Basic (5 sections) or Advanced (9 sections) summaries
+- **External Prompt Files**: Easily customize analysis prompts via markdown files
+- **AI-Powered Summaries**: Generates well-formatted summaries with timestamps, quotes, and references
+- **Multiple AI Models**: OpenAI (GPT-4o-mini, GPT-4o, GPT-5) and Anthropic (Claude Haiku, Claude Sonnet)
+- **Customizable Whisper Models**: Choose from tiny, base, small, medium, or large models
 - **Progress Tracking**: Real-time progress updates for batch processing
 
 ## Prerequisites
@@ -68,15 +82,17 @@ WHISPER_MODEL=base
 
 ```
 Sonopsis/
+├── sonopsis.py          # Interactive menu interface (recommended)
 ├── main.py              # Command-line interface
-├── interactive.py       # Interactive menu interface (recommended)
 ├── utils/               # Core modules (downloader, transcriber, summarizer)
 ├── scripts/             # Testing and comparison scripts
-├── docs/                # Documentation
-│   ├── QUICKSTART.md   # Quick start guide
-│   └── STORAGE.md      # Storage locations info
+├── docs/                # Documentation and analysis prompts
+│   ├── analysis_basic.md      # Basic analysis prompt template
+│   ├── analysis_advanced.md   # Advanced analysis prompt template
+│   ├── QUICKSTART.md          # Quick start guide
+│   └── STORAGE.md             # Storage locations info
 ├── downloads/           # Temporary audio files
-├── transcripts/         # Generated transcripts
+├── transcripts/         # Generated markdown transcripts
 └── summaries/           # AI summaries
 ```
 
@@ -173,18 +189,26 @@ The application creates three directories:
 ```
 Sonopsis/
 ├── downloads/          # Downloaded audio files (deleted unless --keep-files)
-├── transcripts/        # Transcription outputs
-│   ├── *_transcript.json
-│   └── *_transcript.txt
+├── transcripts/        # Timestamped markdown transcripts
+│   └── *_transcript.md
 └── summaries/          # AI-generated summaries
     └── *_summary.md
 ```
 
 ### Sample Output
 
-**Transcript** (`transcripts/Video_Title_transcript.txt`):
-```
-This is the transcribed text from the video...
+**Transcript** (`transcripts/Video_Title_transcript.md`):
+```markdown
+# Transcript
+
+**Language:** en
+**Duration:** 00:15:42
+
+---
+
+**[00:00:15 -> 00:00:42]** Welcome to the show, today we're discussing...
+
+**[00:00:43 -> 00:01:12]** That's a great question. I think the key is...
 ```
 
 **Summary** (`summaries/Video_Title_summary.md`):
