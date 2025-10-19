@@ -196,6 +196,90 @@ def select_whisper_model_menu():
     return models[selected]
 
 
+def prompt_for_hf_token():
+    """Prompt user for Hugging Face token and save to .env file."""
+    width = 100
+    title = "Hugging Face Token Required"
+
+    title_padding = width - len(title) - 5
+    border_top = f"╭─── {title} " + "─" * title_padding + "╮"
+    border_bottom = "╰" + "─" * width + "╯"
+
+    print(f"\n{Fore.YELLOW}{border_top}")
+    print(f"{Fore.YELLOW}│{' ' * width}│")
+    print(f"{Fore.YELLOW}│  WhisperX speaker diarization requires a Hugging Face token.{' ' * 40}│")
+    print(f"{Fore.YELLOW}│{' ' * width}│")
+    print(f"{Fore.YELLOW}│  Get your free token at: {Fore.CYAN}https://huggingface.co/settings/tokens{' ' * 33}{Fore.YELLOW}│")
+    print(f"{Fore.YELLOW}│{' ' * width}│")
+    print(f"{Fore.YELLOW}│  Without a token, WhisperX will work but won't identify speakers.{' ' * 34}│")
+    print(f"{Fore.YELLOW}│{' ' * width}│")
+    print(f"{Fore.YELLOW}{border_bottom}{Style.RESET_ALL}\n")
+
+    while True:
+        choice = input(f"{Fore.CYAN}Enter your HF token (or press Enter to skip): {Style.RESET_ALL}").strip()
+
+        if not choice:
+            print(f"\n{Fore.YELLOW}[!] Continuing without speaker diarization.{Style.RESET_ALL}\n")
+            return None
+
+        # Basic validation - HF tokens start with "hf_"
+        if not choice.startswith("hf_"):
+            print(f"{Fore.RED}[!] Invalid token format. HF tokens should start with 'hf_'{Style.RESET_ALL}")
+            retry = input(f"{Fore.CYAN}Try again? (y/N): {Style.RESET_ALL}").strip().lower()
+            if retry != 'y':
+                return None
+            continue
+
+        # Save to .env file
+        try:
+            env_file = Path(".env")
+
+            # Check if HF_TOKEN already exists in .env
+            if env_file.exists():
+                with open(env_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+
+                if 'HF_TOKEN=' in content:
+                    # Update existing token
+                    lines = content.split('\n')
+                    new_lines = []
+                    for line in lines:
+                        if line.startswith('HF_TOKEN='):
+                            new_lines.append(f'HF_TOKEN={choice}')
+                        else:
+                            new_lines.append(line)
+
+                    with open(env_file, 'w', encoding='utf-8') as f:
+                        f.write('\n'.join(new_lines))
+                else:
+                    # Append new token
+                    with open(env_file, 'a', encoding='utf-8') as f:
+                        if not content.endswith('\n'):
+                            f.write('\n')
+                        f.write(f'\n# Hugging Face API token for WhisperX speaker diarization\n')
+                        f.write(f'# Get your token at: https://huggingface.co/settings/tokens\n')
+                        f.write(f'# Required for PyAnnote speaker diarization with WhisperX\n')
+                        f.write(f'HF_TOKEN={choice}\n')
+            else:
+                # Create new .env file
+                with open(env_file, 'w', encoding='utf-8') as f:
+                    f.write(f'# Hugging Face API token for WhisperX speaker diarization\n')
+                    f.write(f'# Get your token at: https://huggingface.co/settings/tokens\n')
+                    f.write(f'# Required for PyAnnote speaker diarization with WhisperX\n')
+                    f.write(f'HF_TOKEN={choice}\n')
+
+            # Reload environment variables
+            load_dotenv(override=True)
+
+            print(f"\n{Fore.GREEN}[+] Token saved to .env file successfully!{Style.RESET_ALL}")
+            print(f"{Fore.GREEN}[+] Speaker diarization enabled.{Style.RESET_ALL}\n")
+            return choice
+
+        except Exception as e:
+            print(f"{Fore.RED}[!] Error saving token: {str(e)}{Style.RESET_ALL}")
+            return None
+
+
 def select_transcription_mode_menu():
     """Interactive transcription mode selection menu."""
     has_hf_token = bool(os.getenv("HF_TOKEN"))
@@ -205,13 +289,15 @@ def select_transcription_mode_menu():
         "WhisperX - Enhanced transcription with speaker diarization" + ("" if has_hf_token else " [Requires HF_TOKEN]")
     ]
 
-    # Show info about HF token requirement
-    if not has_hf_token:
-        print(f"\n{Fore.YELLOW}Note: WhisperX speaker diarization requires a Hugging Face token (HF_TOKEN in .env)")
-        print(f"      Without it, WhisperX will work but won't label speakers.{Style.RESET_ALL}\n")
-
     selected = show_menu("Select Transcription Mode", menu_items, default_selected=0)  # Default to Whisper
-    return selected == 1  # Returns True for WhisperX, False for vanilla Whisper
+    use_whisperx = (selected == 1)
+
+    # If WhisperX selected but no token, prompt for it
+    if use_whisperx and not has_hf_token:
+        token = prompt_for_hf_token()
+        # Token is now saved and env reloaded, continue with WhisperX
+
+    return use_whisperx  # Returns True for WhisperX, False for vanilla Whisper
 
 
 def select_analysis_mode_menu():
