@@ -4,9 +4,11 @@ Downloads videos from YouTube and extracts audio for transcription.
 """
 
 import os
+import sys
 import yt_dlp
 from pathlib import Path
 from typing import Dict, Optional
+from colorama import Fore, Style
 
 
 class YouTubeDownloader:
@@ -21,6 +23,35 @@ class YouTubeDownloader:
         """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+
+    def _progress_hook(self, d):
+        """Custom progress hook for downloads with cyan progress bar."""
+        if d['status'] == 'downloading':
+            # Get progress info
+            percent = d.get('_percent_str', '0%').strip()
+            speed = d.get('_speed_str', 'N/A').strip()
+            eta = d.get('_eta_str', 'N/A').strip()
+
+            # Create progress bar (50 chars wide)
+            try:
+                percent_float = float(percent.replace('%', ''))
+                bar_length = 50
+                filled = int(bar_length * percent_float / 100)
+                bar = '█' * filled + '░' * (bar_length - filled)
+
+                # Display progress with cyan colors
+                progress_text = f"\r{Fore.CYAN}[{bar}] {percent} | {speed} | ETA: {eta}{Style.RESET_ALL}"
+                sys.stdout.write(progress_text)
+                sys.stdout.flush()
+            except:
+                # Fallback to simple display
+                sys.stdout.write(f"\r{Fore.CYAN}Downloading... {percent}{Style.RESET_ALL}")
+                sys.stdout.flush()
+
+        elif d['status'] == 'finished':
+            # Clear the line and show completion
+            sys.stdout.write(f"\r{Fore.CYAN}{'━' * 80}\n{Style.RESET_ALL}")
+            sys.stdout.flush()
 
     def download_video(self, url: str, audio_only: bool = True) -> Dict[str, str]:
         """
@@ -47,6 +78,7 @@ class YouTubeDownloader:
             'fragment_retries': 3,
             'restrictfilenames': True,  # Convert special chars to ASCII
             'windowsfilenames': True,  # Make filenames Windows-safe
+            'progress_hooks': [self._progress_hook],  # Custom progress bar
         }
 
         if audio_only:
