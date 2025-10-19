@@ -98,7 +98,7 @@ class AudioTranscriber:
             # Create progress bar (50 chars wide, matching download bar)
             bar_length = 50
             filled = int(bar_length * percent / 100)
-            bar = '█' * filled + '░' * (bar_length - filled)
+            bar = '=' * filled + '-' * (bar_length - filled)
 
             # Format time as MM:SS / MM:SS
             elapsed_str = self._format_time_short(elapsed)
@@ -106,8 +106,12 @@ class AudioTranscriber:
 
             # Display progress with cyan colors (matching download bar)
             progress_text = f"\r{Fore.CYAN}[{bar}] {percent:.1f}% | {elapsed_str} / {total_str}{Style.RESET_ALL}"
-            sys.stdout.write(progress_text)
-            sys.stdout.flush()
+            try:
+                sys.stdout.write(progress_text)
+                sys.stdout.flush()
+            except UnicodeEncodeError:
+                # Fallback for console encoding issues
+                pass
 
             time.sleep(0.5)  # Update every 500ms
 
@@ -203,7 +207,7 @@ class AudioTranscriber:
                 progress_thread.join(timeout=1)
 
             # Clear the line and show completion (matching download bar)
-            sys.stdout.write(f"\r{Fore.CYAN}{'━' * 80}\n{Style.RESET_ALL}")
+            sys.stdout.write(f"\r{Fore.CYAN}{'-' * 80}\n{Style.RESET_ALL}")
             sys.stdout.flush()
             print()  # Space below
 
@@ -277,7 +281,7 @@ class AudioTranscriber:
                 progress_thread.join(timeout=1)
 
             # Clear the line
-            sys.stdout.write(f"\r{Fore.CYAN}{'━' * 80}\n{Style.RESET_ALL}")
+            sys.stdout.write(f"\r{Fore.CYAN}{'-' * 80}\n{Style.RESET_ALL}")
             sys.stdout.flush()
 
             # Align whisper output
