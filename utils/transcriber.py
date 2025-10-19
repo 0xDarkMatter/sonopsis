@@ -292,8 +292,12 @@ class AudioTranscriber:
             # Perform speaker diarization if HF token is available
             if self.hf_token:
                 print(f"[*] Performing speaker diarization...")
-                diarize_model = whisperx.DiarizationPipeline(use_auth_token=self.hf_token, device=device)
-                diarize_segments = diarize_model(audio)
+                from pyannote.audio import Pipeline
+                diarize_model = Pipeline.from_pretrained(
+                    "pyannote/speaker-diarization-3.1",
+                    use_auth_token=self.hf_token
+                ).to(torch.device(device))
+                diarize_segments = diarize_model(str(audio_path))
                 result = whisperx.assign_word_speakers(diarize_segments, result)
 
             print()  # Space below
