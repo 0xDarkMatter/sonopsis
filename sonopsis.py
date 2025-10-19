@@ -282,12 +282,23 @@ def prompt_for_hf_token():
 
 def select_transcription_mode_menu():
     """Interactive transcription mode selection menu."""
+    import torch
+
     has_hf_token = bool(os.getenv("HF_TOKEN"))
+    has_gpu = torch.cuda.is_available()
 
     menu_items = [
         "Whisper - Standard transcription (no speaker labels)",
         "WhisperX - Enhanced transcription with speaker diarization" + ("" if has_hf_token else " [Requires HF_TOKEN]")
     ]
+
+    # Show warning about WhisperX performance
+    if not has_gpu:
+        print(f"\n{Fore.YELLOW}Note: No GPU detected - running on CPU{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}      WhisperX will be 3-5x slower than Whisper on CPU{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}      Recommend: Use vanilla Whisper for faster transcription{Style.RESET_ALL}\n")
+    else:
+        print(f"\n{Fore.GREEN}GPU detected - WhisperX will run efficiently{Style.RESET_ALL}\n")
 
     selected = show_menu("Select Transcription Mode", menu_items, default_selected=0)  # Default to Whisper
     use_whisperx = (selected == 1)
