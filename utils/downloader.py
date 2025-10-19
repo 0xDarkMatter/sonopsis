@@ -42,7 +42,7 @@ class YouTubeDownloader:
                 percent_float = float(percent.replace('%', ''))
                 bar_length = 50
                 filled = int(bar_length * percent_float / 100)
-                bar = '█' * filled + '░' * (bar_length - filled)
+                bar = '=' * filled + '-' * (bar_length - filled)
 
                 # Display progress with cyan colors
                 progress_text = f"\r{Fore.CYAN}[{bar}] {percent} | {speed} | ETA: {eta}{Style.RESET_ALL}"
@@ -55,7 +55,7 @@ class YouTubeDownloader:
 
         elif d['status'] == 'finished':
             # Clear the line and show completion
-            sys.stdout.write(f"\r{Fore.CYAN}{'━' * 80}\n{Style.RESET_ALL}")
+            sys.stdout.write(f"\r{Fore.CYAN}{'-' * 80}\n{Style.RESET_ALL}")
             sys.stdout.flush()
             print()  # Space below
             # Reset for next download
