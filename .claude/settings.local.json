@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(choco install:*)",
+      "Bash(ffmpeg:*)",
+      "Bash(winget:*)",
+      "Bash(test:*)",
+      "Bash(python main.py:*)",
+      "Bash(python process_existing.py:*)",
+      "Bash(python:*)",
+      "WebSearch",
+      "Read(//c/Users/Mack/.cache/whisper/**)",
+      "Bash(move:*)",
+      "Bash(chmod:*)",
+      "Bash(pip uninstall:*)",
+      "Bash(pkill:*)",
+      "Bash(tasklist /FI \"IMAGENAME eq python.exe\" /FO CSV)",
+      "Bash(wmic process where \"name=''python.exe''\" get processid,commandline)",
+      "Bash(dir:*)",
+      "Bash(powershell -Command \"Get-Process -Id 194436 | Select-Object Id,CPU,WorkingSet,StartTime,ProcessName | Format-List\")",
+      "Bash(powershell -Command \"Get-Process -Id 194436 | Select-Object CPU,WorkingSet | Format-List\")",
+      "Bash(powershell -Command:*)",
+      "Bash(wmic process where \"name=''''python.exe''''\" get processid,commandline)",
+      "Read(//e/**)",
+      "Bash(git init)",
+      "Bash(git add -A)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
