@@ -157,11 +157,17 @@ class ContentSummarizer:
         with open(prompt_file, 'r', encoding='utf-8') as f:
             template = f.read()
 
+        # Extract video ID from URL
+        url = metadata.get('url', 'N/A')
+        video_id = self._extract_video_id(url) if url != 'N/A' else 'N/A'
+
         # Replace placeholders
         prompt = template.format(
             title=metadata.get('title', 'Unknown'),
             uploader=metadata.get('uploader', 'Unknown'),
             duration=self._format_duration(metadata.get('duration', 0)),
+            url=url,
+            video_id=video_id,
             transcript=transcript
         )
 
@@ -196,6 +202,22 @@ class ContentSummarizer:
             return f"{minutes}m {secs}s"
         else:
             return f"{secs}s"
+
+    @staticmethod
+    def _extract_video_id(url: str) -> str:
+        """Extract YouTube video ID from URL."""
+        try:
+            # Handle different YouTube URL formats
+            if 'youtu.be/' in url:
+                # Format: https://youtu.be/VIDEO_ID
+                return url.split('youtu.be/')[-1].split('?')[0]
+            elif 'watch?v=' in url:
+                # Format: https://www.youtube.com/watch?v=VIDEO_ID
+                return url.split('watch?v=')[-1].split('&')[0]
+            else:
+                return 'N/A'
+        except:
+            return 'N/A'
 
     @staticmethod
     def _sanitize_filename(filename: str) -> str:
