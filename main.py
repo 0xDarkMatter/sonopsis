@@ -46,7 +46,8 @@ def print_info(message: str):
 
 
 def process_single_video(url: str, whisper_model: str = "base", gpt_model: str = "gpt-4o-mini",
-                         keep_files: bool = False, video_num: int = None, total_videos: int = None):
+                         analysis_mode: str = "basic", keep_files: bool = False,
+                         video_num: int = None, total_videos: int = None):
     """
     Process a single YouTube video: download, transcribe, and summarize.
 
@@ -54,6 +55,7 @@ def process_single_video(url: str, whisper_model: str = "base", gpt_model: str =
         url: YouTube video URL
         whisper_model: Whisper model size (tiny, base, small, medium, large)
         gpt_model: GPT model for summarization
+        analysis_mode: Analysis mode (basic or advanced)
         keep_files: Whether to keep downloaded audio files
         video_num: Current video number (for batch processing)
         total_videos: Total number of videos (for batch processing)
@@ -91,7 +93,7 @@ def process_single_video(url: str, whisper_model: str = "base", gpt_model: str =
             'url': video_data['url']
         }
 
-        summary_data = summarizer.summarize(transcript_data['text'], metadata)
+        summary_data = summarizer.summarize(transcript_data['text'], metadata, analysis_mode)
         print_success("Summary generated")
 
         # Cleanup
@@ -131,7 +133,7 @@ def process_single_video(url: str, whisper_model: str = "base", gpt_model: str =
 
 
 def process_playlist(url: str, whisper_model: str = "base", gpt_model: str = "gpt-4o-mini",
-                     keep_files: bool = False, start_from: int = 1):
+                     analysis_mode: str = "basic", keep_files: bool = False, start_from: int = 1):
     """
     Process all videos in a YouTube playlist.
 
@@ -139,6 +141,7 @@ def process_playlist(url: str, whisper_model: str = "base", gpt_model: str = "gp
         url: YouTube playlist URL
         whisper_model: Whisper model size
         gpt_model: GPT model for summarization
+        analysis_mode: Analysis mode (basic or advanced)
         keep_files: Whether to keep downloaded audio files
         start_from: Video number to start from (1-indexed)
     """
@@ -180,6 +183,7 @@ def process_playlist(url: str, whisper_model: str = "base", gpt_model: str = "gp
                 video['url'],
                 whisper_model,
                 gpt_model,
+                analysis_mode,
                 keep_files,
                 video_num=idx,
                 total_videos=len(videos)
@@ -269,6 +273,13 @@ Examples:
     )
 
     parser.add_argument(
+        "--analysis-mode",
+        default="basic",
+        choices=["basic", "advanced"],
+        help="Analysis mode: basic (5 sections) or advanced (9 sections) (default: basic)"
+    )
+
+    parser.add_argument(
         "--keep-files",
         action="store_true",
         help="Keep downloaded audio files"
@@ -293,6 +304,7 @@ Examples:
             url=args.url,
             whisper_model=args.whisper_model,
             gpt_model=args.gpt_model,
+            analysis_mode=args.analysis_mode,
             keep_files=args.keep_files,
             start_from=args.start_from
         )
@@ -303,6 +315,7 @@ Examples:
             url=args.url,
             whisper_model=args.whisper_model,
             gpt_model=args.gpt_model,
+            analysis_mode=args.analysis_mode,
             keep_files=args.keep_files
         )
 
