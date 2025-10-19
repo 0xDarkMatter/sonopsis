@@ -71,10 +71,6 @@ Select 3-5 of the most significant, memorable, or revealing quotes. Choose quote
 - Are self-contained and meaningful
 - Represent important perspectives or claims
 
-Format each as:
-> "Exact quote here"
-> 
-> *Context: Brief explanation of significance*
 
 ### 3. Main Content (Chronological Narrative)
 
@@ -133,108 +129,6 @@ At the end, compile comprehensive lists:
 4. Use > blockquotes for the 3-5 key quotes section only
 5. Inline brackets [like this] for enhanced references and context
 6. Preserve numbering if speaker uses it (3 principles, 5 stages, etc.)
-
-**CRITICAL - NEUTRAL DOCUMENTATION:**
-Your role is accurate documentation following the chronological flow, not analysis or judgment.
-
-- DO: Follow the order of topics as discussed
-- DO: Organize content for clarity and readability
-- DO: Preserve exact claims, frameworks, and arguments as stated
-- DO: Add helpful context about people, works, and incidents mentioned
-- DON'T: Reorder topics for "better" organization (keep chronological)
-- DON'T: Add editorial distance ("they claim," "allegedly," "without evidence")
-- DON'T: Insert skeptical framing not present in original
-- DON'T: Summarize away details to "save space"
-
-The reader will form their own judgments. Your job is accurate, complete, chronological, readable documentation with enhanced references.
-
----
-
-**TRANSFORMATION REQUIREMENTS**
-
-Your goal is to create a text version that someone can read 5x faster than listening to the podcast, while retaining complete fidelity to the content. This will also be ingested by AI tools for further analysis.
-
-## Content Preservation
-- Preserve ALL substantive claims, arguments, examples, and narratives
-- Maintain the speaker's voice and perspective - don't editorialize
-- Keep technical terms, specific names, numbers, and references exactly as stated
-- Include tangents and digressions if they contain meaningful content
-- Retain qualifiers (might, could, possibly, likely, etc.) as originally stated
-
-## Structural Organization
-
-### 1. Opening Summary (2-3 sentences)
-Brief orientation to the content's scope and purpose.
-
-### 2. Key Quotes (3-5 selections)
-Select 3-5 of the most significant, memorable, or revealing quotes from the content. Choose quotes that:
-- Capture core arguments or unique insights
-- Are self-contained and meaningful out of context
-- Represent important perspectives or claims
-- Would make good pull-quotes or highlights
-
-Format each as:
-> "Exact quote here"
-> 
-> *Context: Brief explanation of why this quote matters and what it reveals*
-
-### 3. Main Content
-Organize the transcript into logical sections with descriptive headers. Use these principles:
-
-**Section Organization:**
-- Create sections for natural topic shifts or thematic boundaries
-- Use descriptive headers that capture the specific content (not generic "Introduction")
-- Nest subsections (###, ####) for sub-topics or detailed explorations
-- If it's an interview: organize by question/topic, not speaker turns
-
-**Content Presentation:**
-- Write in clear, flowing prose - not bullet points unless listing specific items
-- Combine fragmented speech into coherent paragraphs
-- Remove verbal tics (um, uh, you know, like) and false starts
-- Keep the substance of every significant point made
-- Preserve examples, stories, analogies, and thought experiments
-- Maintain the logical flow of arguments
-
-**Enhanced Annotations:**
-When people, works, or organizations are mentioned, add inline clarification in brackets only if helpful for context:
-- "As John Mack [Harvard psychiatrist, 1929-2004] argued..."
-- "The phenomenon was documented in the Condon Report [1968 USAF study]..."
-- Keep annotations minimal - just enough for clarity
-
-## 4. Key Insights & Takeaways
-
-### Core Insights (5-8 items)
-For each insight:
-- State it clearly and specifically
-- Explain why it's significant or actionable
-- Note the type of claim (established fact, research finding, personal experience, theoretical framework, speculation)
-
-
-## 5. References & Resources
-
-At the end, compile:
-
-### People Mentioned
-- Name - Role/relevance (brief)
-
-### Works Referenced
-- Books, papers, films, etc. with author/creator if mentioned
-
-### Organizations & Institutions
-- Name - Context of mention
-
-### Recommended Resources
-- Any tools, websites, or materials suggested
-
----
-
-**FORMATTING REQUIREMENTS**
-
-1. Use Markdown hierarchy: ## for major sections, ### for subsections, #### for sub-points
-2. Write in paragraphs with natural prose flow, not choppy bullet points
-3. Bold only: technical terms on first use, names of people/works, key concepts
-4. Use > blockquotes for significant direct statements or memorable phrasing
-5. Preserve numbering if speaker uses it (3 principles, 5 stages, etc.)
 
 
 

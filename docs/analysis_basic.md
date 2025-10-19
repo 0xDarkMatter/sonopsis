@@ -45,8 +45,6 @@ Select 3-5 of the most significant, memorable, or revealing quotes from the cont
 
 Format each as:
 > "Exact quote here"
-> 
-> *Context: Brief explanation of why this quote matters and what it reveals*
 
 ## 3. Content Structure
 
