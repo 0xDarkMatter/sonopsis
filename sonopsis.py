@@ -196,6 +196,24 @@ def select_whisper_model_menu():
     return models[selected]
 
 
+def select_transcription_mode_menu():
+    """Interactive transcription mode selection menu."""
+    has_hf_token = bool(os.getenv("HF_TOKEN"))
+
+    menu_items = [
+        "Whisper - Standard transcription (no speaker labels)",
+        "WhisperX - Enhanced transcription with speaker diarization" + ("" if has_hf_token else " [Requires HF_TOKEN]")
+    ]
+
+    # Show info about HF token requirement
+    if not has_hf_token:
+        print(f"\n{Fore.YELLOW}Note: WhisperX speaker diarization requires a Hugging Face token (HF_TOKEN in .env)")
+        print(f"      Without it, WhisperX will work but won't label speakers.{Style.RESET_ALL}\n")
+
+    selected = show_menu("Select Transcription Mode", menu_items, default_selected=0)  # Default to Whisper
+    return selected == 1  # Returns True for WhisperX, False for vanilla Whisper
+
+
 def select_analysis_mode_menu():
     """Interactive analysis mode selection menu."""
     menu_items = [
@@ -481,7 +499,7 @@ def select_summary_model():
         print(f"{Fore.RED}[!] Invalid choice. Please enter 1-{len(models)}.{Style.RESET_ALL}")
 
 
-def process_single_video(url, whisper_model, summary_model, analysis_mode, keep_files, download_video=False, video_num=None, total_videos=None):
+def process_single_video(url, whisper_model, summary_model, analysis_mode, keep_files, download_video=False, use_whisperx=False, video_num=None, total_videos=None):
     """Process a single video with selected models."""
 
     # Add video counter to header if processing multiple videos
@@ -498,8 +516,14 @@ def process_single_video(url, whisper_model, summary_model, analysis_mode, keep_
         print(f"{Fore.CYAN}[+] Download complete{Style.RESET_ALL}\n")
 
         # Step 2: Transcribe
-        print(f"{Fore.CYAN}[2/3] Transcribing audio with {whisper_model} model...{Style.RESET_ALL}")
-        transcriber = AudioTranscriber(model_name=whisper_model, output_dir="transcripts")
+        transcription_type = "WhisperX" if use_whisperx else "Whisper"
+        print(f"{Fore.CYAN}[2/3] Transcribing audio with {transcription_type} ({whisper_model} model)...{Style.RESET_ALL}")
+        transcriber = AudioTranscriber(
+            model_name=whisper_model,
+            output_dir="transcripts",
+            use_whisperx=use_whisperx,
+            hf_token=os.getenv("HF_TOKEN")
+        )
         transcript_data = transcriber.transcribe(video_data['audio_file'])
         print(f"{Fore.CYAN}[+] Transcription complete ({transcript_data['language']}){Style.RESET_ALL}\n")
 
@@ -554,7 +578,7 @@ def process_single_video(url, whisper_model, summary_model, analysis_mode, keep_
         }
 
 
-def process_playlist(url, whisper_model, summary_model, analysis_mode, keep_files, download_video=False):
+def process_playlist(url, whisper_model, summary_model, analysis_mode, keep_files, download_video=False, use_whisperx=False):
     """Process all videos in a playlist."""
     try:
         # Get playlist videos
@@ -566,11 +590,12 @@ def process_playlist(url, whisper_model, summary_model, analysis_mode, keep_file
             return False
 
         # Show playlist summary
+        transcription_type = "WhisperX" if use_whisperx else "Whisper"
         print(f"\n{Fore.CYAN}{'='*70}")
         print(f"{Fore.CYAN}  PLAYLIST SUMMARY")
         print(f"{Fore.CYAN}{'='*70}{Style.RESET_ALL}\n")
         print(f"{Fore.CYAN}Total videos: {len(videos)}")
-        print(f"{Fore.CYAN}Whisper model: {whisper_model}")
+        print(f"{Fore.CYAN}Transcription: {transcription_type} ({whisper_model})")
         print(f"{Fore.CYAN}AI model: {summary_model}")
         print(f"{Fore.CYAN}Analysis mode: {analysis_mode}\n")
 
@@ -598,6 +623,7 @@ def process_playlist(url, whisper_model, summary_model, analysis_mode, keep_file
                 analysis_mode,
                 keep_files,
                 download_video,
+                use_whisperx,
                 video_num=idx,
                 total_videos=len(videos)
             )
@@ -644,16 +670,19 @@ def main():
             print(f"\n{Fore.CYAN}Thanks for using Sonopsis!{Style.RESET_ALL}\n")
             sys.exit(0)
 
-        # Step 2: Select Whisper model
+        # Step 2: Select transcription mode (Whisper vs WhisperX)
+        use_whisperx = select_transcription_mode_menu()
+
+        # Step 3: Select Whisper model
         whisper_model = select_whisper_model_menu()
 
-        # Step 3: Select AI model
+        # Step 4: Select AI model
         summary_model = select_summary_model_menu()
 
-        # Step 4: Select analysis mode
+        # Step 5: Select analysis mode
         analysis_mode = select_analysis_mode_menu()
 
-        # Step 5: Get YouTube URL
+        # Step 6: Get YouTube URL
         url = get_youtube_url_menu()
 
         # Verify the URL type matches choice
@@ -676,9 +705,9 @@ def main():
         # Process based on type
         print(f"\n{Fore.CYAN}Starting processing...{Style.RESET_ALL}\n")
         if is_playlist:
-            process_playlist(url, whisper_model, summary_model, analysis_mode, keep_files, download_video)
+            process_playlist(url, whisper_model, summary_model, analysis_mode, keep_files, download_video, use_whisperx)
         else:
-            process_single_video(url, whisper_model, summary_model, analysis_mode, keep_files, download_video)
+            process_single_video(url, whisper_model, summary_model, analysis_mode, keep_files, download_video, use_whisperx)
 
         print(f"\n{Fore.CYAN}{'─' * 70}{Style.RESET_ALL}\n")
 
