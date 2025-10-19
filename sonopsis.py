@@ -202,7 +202,7 @@ def select_analysis_mode_menu():
         "Basic - Quick summary with key topics and quotes (5 sections)",
         "Advanced - Comprehensive analysis with detailed notes (9 sections)"
     ]
-    selected = show_menu("Select Analysis Mode", menu_items, default_selected=1)  # Default to Advanced
+    selected = show_menu("Select Analysis Mode", menu_items, default_selected=0)  # Default to Basic
     modes = ['basic', 'advanced']
     return modes[selected]
 
