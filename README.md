@@ -98,31 +98,18 @@ Sonopsis/
 
 ## Usage
 
-### Quick Start (Easiest!)
-
-```bash
-python ytp.py
-```
-
-**Or on Windows:**
-```bash
-ytp
-```
-
-**Or on Linux/Mac:**
-```bash
-./ytp.sh
-```
-
 ### Interactive Mode (Recommended)
 
-The short command `ytp` launches the full interactive interface:
+```bash
+python sonopsis.py
+```
 
 **Features:**
 - Step-by-step guided interface with beautiful colored menus
 - Interactive model selection with descriptions
 - Shows already-downloaded Whisper models
 - Clear cost and speed information with visual tags
+- Analysis mode selection (Basic or Advanced)
 - Process multiple videos in one session
 
 ### Command Line Mode
