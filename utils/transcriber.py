@@ -7,7 +7,6 @@ import os
 import whisper
 from pathlib import Path
 from typing import Dict, Optional
-import json
 
 
 class AudioTranscriber:
@@ -34,13 +33,15 @@ class AudioTranscriber:
         self.model = whisper.load_model(model_name, download_root=whisper_cache)
         print(f"[+] Model loaded successfully")
 
-    def transcribe(self, audio_file: str, language: Optional[str] = None) -> Dict[str, any]:
+    def transcribe(self, audio_file: str, language: Optional[str] = None,
+                   podcast_mode: bool = True) -> Dict[str, any]:
         """
         Transcribe an audio file.
 
         Args:
             audio_file: Path to audio file
             language: Language code (e.g., 'en', 'es'). Auto-detect if None.
+            podcast_mode: If True, optimize for multi-speaker conversations
 
         Returns:
             Dictionary containing transcription results
@@ -60,50 +61,76 @@ class AudioTranscriber:
             print(f"[*] Transcribing audio file...")
 
         try:
-            # Transcribe with Whisper
-            result = self.model.transcribe(
-                str(audio_path),
-                language=language,
-                verbose=False
-            )
+            # Create optimized prompt for podcast/multi-speaker content
+            if podcast_mode:
+                initial_prompt = (
+                    "This is a professional podcast interview discussing technology, business, and innovation. "
+                    "The speakers use natural conversational speech with occasional filler words. "
+                    "Use proper punctuation and capitalize names, companies, products, and technical terms correctly. "
+                    "Format in complete sentences with clear paragraph breaks. "
+                    "Preserve meaningful pauses and emphasis while minimizing excessive filler words like um, uh, you know. "
+                    "Maintain accuracy for all speakers and their distinct speaking styles."
+                )
+            else:
+                initial_prompt = None
 
-            # Prepare output
-            transcript_data = {
-                'text': result['text'].strip(),
-                'language': result['language'],
-                'segments': [
-                    {
-                        'start': seg['start'],
-                        'end': seg['end'],
-                        'text': seg['text'].strip()
-                    }
-                    for seg in result['segments']
-                ]
+            # Transcribe with Whisper with enhanced settings
+            transcribe_options = {
+                'language': language,
+                'verbose': False,
+                'temperature': 0.0,  # More deterministic, less hallucination
+                'compression_ratio_threshold': 2.4,  # Reject overly repetitive segments
+                'logprob_threshold': -1.0,  # Reject low-confidence segments
+                'no_speech_threshold': 0.6,  # Better silence detection
             }
 
-            # Save transcript
-            transcript_file = self.output_dir / f"{audio_path.stem}_transcript.json"
-            with open(transcript_file, 'w', encoding='utf-8') as f:
-                json.dump(transcript_data, f, indent=2, ensure_ascii=False)
+            # Add prompt if in podcast mode
+            if initial_prompt:
+                transcribe_options['initial_prompt'] = initial_prompt
 
-            # Also save plain text version
-            text_file = self.output_dir / f"{audio_path.stem}_transcript.txt"
-            with open(text_file, 'w', encoding='utf-8') as f:
-                f.write(transcript_data['text'])
+            result = self.model.transcribe(
+                str(audio_path),
+                **transcribe_options
+            )
+
+            # Create timestamped transcript in Markdown format
+            timestamped_lines = []
+            for seg in result['segments']:
+                start_time = self._format_timestamp(seg['start'])
+                end_time = self._format_timestamp(seg['end'])
+                timestamped_lines.append(f"**[{start_time} -> {end_time}]** {seg['text'].strip()}")
+
+            timestamped_text = '\n\n'.join(timestamped_lines)  # Double newline for paragraph spacing
+            plain_text = result['text'].strip()
+
+            # Create markdown header
+            markdown_content = f"""# Transcript
+
+**Language:** {result['language']}
+**Duration:** {self._format_timestamp(result['segments'][-1]['end'] if result['segments'] else 0)}
+
+---
+
+{timestamped_text}
+"""
+
+            # Save as Markdown file
+            md_file = self.output_dir / f"{audio_path.stem}_transcript.md"
+            with open(md_file, 'w', encoding='utf-8') as f:
+                f.write(markdown_content)
 
             print(f"[+] Transcription complete")
+            print(f"Detected language: {result['language']}")
             try:
-                print(f"[*] Saved to: {transcript_file}")
-                print(f"[*] Plain text: {text_file}")
+                print(f"[*] Saved to: {md_file}")
             except UnicodeEncodeError:
                 print(f"[*] Files saved to transcripts directory")
 
             return {
-                'text': transcript_data['text'],
-                'language': transcript_data['language'],
-                'segments': transcript_data['segments'],
-                'transcript_file': str(transcript_file),
-                'text_file': str(text_file)
+                'text': timestamped_text,  # Send timestamped version to LLM
+                'plain_text': plain_text,  # Keep plain text available if needed
+                'language': result['language'],
+                'text_file': str(md_file)
             }
 
         except Exception as e:
