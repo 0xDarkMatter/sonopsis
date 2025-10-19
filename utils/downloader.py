@@ -36,17 +36,17 @@ class YouTubeDownloader:
         Raises:
             Exception: If download fails
         """
-        print(f"[*] Downloading from: {url}")
-
         # Configure download options
         ydl_opts = {
             'format': 'bestaudio/best' if audio_only else 'best',
-            'outtmpl': str(self.output_dir / '%(title)s.%(ext)s'),
-            'quiet': False,
-            'no_warnings': False,
-            'socket_timeout': 30,  # 30 second socket timeout
-            'retries': 3,  # Retry 3 times on failure
-            'fragment_retries': 3,  # Retry fragments 3 times
+            'outtmpl': str(self.output_dir / '%(title).200B.%(ext)s'),
+            'quiet': True,
+            'no_warnings': True,
+            'socket_timeout': 30,
+            'retries': 3,
+            'fragment_retries': 3,
+            'restrictfilenames': True,  # Convert special chars to ASCII
+            'windowsfilenames': True,  # Make filenames Windows-safe
         }
 
         if audio_only:
@@ -69,8 +69,16 @@ class YouTubeDownloader:
                 else:
                     audio_file = Path(ydl.prepare_filename(info))
 
+                # Sanitize title for safe handling
+                title = info.get('title', 'Unknown')
+                try:
+                    # Try to encode to ensure it's safe
+                    title.encode('utf-8')
+                except (UnicodeEncodeError, UnicodeDecodeError, AttributeError):
+                    title = 'Video'
+
                 result = {
-                    'title': info.get('title', 'Unknown'),
+                    'title': title,
                     'duration': info.get('duration', 0),
                     'uploader': info.get('uploader', 'Unknown'),
                     'upload_date': info.get('upload_date', 'Unknown'),
@@ -79,13 +87,6 @@ class YouTubeDownloader:
                     'audio_file': str(audio_file),
                     'url': url
                 }
-
-                try:
-                    print(f"[+] Downloaded: {result['title']}")
-                    print(f"[*] Saved to: {audio_file}")
-                except UnicodeEncodeError:
-                    print(f"[+] Download complete")
-                    print(f"[*] Saved to downloads directory")
 
                 return result
 
