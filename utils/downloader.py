@@ -32,6 +32,11 @@ class YouTubeDownloader:
             speed = d.get('_speed_str', 'N/A').strip()
             eta = d.get('_eta_str', 'N/A').strip()
 
+            # Add space above on first call
+            if not hasattr(self, '_progress_started'):
+                print()
+                self._progress_started = True
+
             # Create progress bar (50 chars wide)
             try:
                 percent_float = float(percent.replace('%', ''))
@@ -52,6 +57,10 @@ class YouTubeDownloader:
             # Clear the line and show completion
             sys.stdout.write(f"\r{Fore.CYAN}{'━' * 80}\n{Style.RESET_ALL}")
             sys.stdout.flush()
+            print()  # Space below
+            # Reset for next download
+            if hasattr(self, '_progress_started'):
+                delattr(self, '_progress_started')
 
     def download_video(self, url: str, audio_only: bool = True) -> Dict[str, str]:
         """

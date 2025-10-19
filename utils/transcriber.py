@@ -4,9 +4,14 @@ Transcribes audio files using OpenAI's Whisper model.
 """
 
 import os
+import sys
+import time
 import whisper
+import threading
 from pathlib import Path
 from typing import Dict, Optional
+from colorama import Fore, Style
+from pydub.utils import mediainfo
 
 
 class AudioTranscriber:
@@ -22,6 +27,7 @@ class AudioTranscriber:
         """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self._stop_progress = False
 
         # Use custom Whisper cache location on E: drive
         # This allows sharing models across all projects without using C: drive space
@@ -32,6 +38,52 @@ class AudioTranscriber:
         print(f"[*] Model cache: {whisper_cache}")
         self.model = whisper.load_model(model_name, download_root=whisper_cache)
         print(f"[+] Model loaded successfully")
+
+    def _get_audio_duration(self, audio_file: str) -> float:
+        """Get duration of audio file in seconds."""
+        try:
+            info = mediainfo(audio_file)
+            return float(info.get('duration', 0))
+        except:
+            return 0
+
+    def _show_progress(self, duration: float):
+        """Show progress bar during transcription with cyan styling."""
+        start_time = time.time()
+
+        # Add space above
+        print()
+
+        while not self._stop_progress:
+            elapsed = time.time() - start_time
+
+            # Estimate progress (Whisper typically processes at 0.5-2x real-time speed)
+            # Using conservative estimate of 0.7x speed
+            estimated_total = duration / 0.7
+            percent = min((elapsed / estimated_total) * 100, 99.9) if estimated_total > 0 else 0
+
+            # Create progress bar (50 chars wide, matching download bar)
+            bar_length = 50
+            filled = int(bar_length * percent / 100)
+            bar = '█' * filled + '░' * (bar_length - filled)
+
+            # Format time as MM:SS / MM:SS
+            elapsed_str = self._format_time_short(elapsed)
+            total_str = self._format_time_short(estimated_total)
+
+            # Display progress with cyan colors (matching download bar)
+            progress_text = f"\r{Fore.CYAN}[{bar}] {percent:.1f}% | {elapsed_str} / {total_str}{Style.RESET_ALL}"
+            sys.stdout.write(progress_text)
+            sys.stdout.flush()
+
+            time.sleep(0.5)  # Update every 500ms
+
+    @staticmethod
+    def _format_time_short(seconds: float) -> str:
+        """Format seconds to MM:SS."""
+        mins = int(seconds // 60)
+        secs = int(seconds % 60)
+        return f"{mins:02d}:{secs:02d}"
 
     def transcribe(self, audio_file: str, language: Optional[str] = None,
                    podcast_mode: bool = True) -> Dict[str, any]:
@@ -61,6 +113,17 @@ class AudioTranscriber:
             print(f"[*] Transcribing audio file...")
 
         try:
+            # Get audio duration for progress estimation
+            duration = self._get_audio_duration(str(audio_path))
+
+            # Start progress bar in separate thread
+            self._stop_progress = False
+            progress_thread = None
+            if duration > 0:
+                progress_thread = threading.Thread(target=self._show_progress, args=(duration,))
+                progress_thread.daemon = True
+                progress_thread.start()
+
             # Create optimized prompt for podcast/multi-speaker content
             if podcast_mode:
                 initial_prompt = (
@@ -92,6 +155,16 @@ class AudioTranscriber:
                 str(audio_path),
                 **transcribe_options
             )
+
+            # Stop progress bar
+            self._stop_progress = True
+            if progress_thread:
+                progress_thread.join(timeout=1)
+
+            # Clear the line and show completion (matching download bar)
+            sys.stdout.write(f"\r{Fore.CYAN}{'━' * 80}\n{Style.RESET_ALL}")
+            sys.stdout.flush()
+            print()  # Space below
 
             # Create timestamped transcript in Markdown format
             timestamped_lines = []
