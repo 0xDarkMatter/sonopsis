@@ -81,11 +81,18 @@ Extract any:
 - Versions, specifications, or technical requirements
 
 ### People & References
+
+**CRITICAL - ONLY INCLUDE WHAT IS ACTUALLY MENTIONED IN THE TRANSCRIPT:**
+- Do NOT add references that seem "relevant" but weren't explicitly mentioned
+- Do NOT hallucinate people, works, or organizations for context
+- Only list what speakers explicitly named or discussed
+- If unsure whether something was mentioned, leave it out
+
 List any:
-- Named individuals and their relevance
-- Books, papers, articles, or other content referenced
-- Organizations, companies, or institutions mentioned
-- URLs or resources recommended
+- Named individuals and their relevance (ONLY if mentioned)
+- Books, papers, articles, or other content referenced (ONLY if mentioned)
+- Organizations, companies, or institutions mentioned (ONLY if mentioned)
+- URLs or resources recommended (ONLY if mentioned)
 
 ## 4. Key Insights & Takeaways
 

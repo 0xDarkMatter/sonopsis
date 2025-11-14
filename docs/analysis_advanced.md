@@ -124,23 +124,29 @@ Add enriching details when references are made, but keep them minimal and inline
 
 At the end, compile comprehensive lists:
 
+**CRITICAL - ONLY INCLUDE REFERENCES THAT ARE ACTUALLY MENTIONED IN THE TRANSCRIPT:**
+- Do NOT add people, works, or events that seem "relevant" but weren't mentioned
+- Do NOT hallucinate references for context
+- Only list what speakers explicitly named or discussed
+- If unsure, leave it out
+
 **People Mentioned:**
-- **Name** - Role/context, dates if relevant
+- **Name** - Role/context, dates if relevant (ONLY if mentioned in transcript)
 
 **Works Referenced:**
-- *Title* by Author (Year) - Type (book/paper/film/etc.)
+- *Title* by Author (Year) - Type (book/paper/film/etc.) (ONLY if mentioned in transcript)
 
 **Places & Locations:**
-- **Name** - Significance or context
+- **Name** - Significance or context (ONLY if mentioned in transcript)
 
 **Incidents & Events:**
-- **Name/Description** - Date, key details
+- **Name/Description** - Date, key details (ONLY if mentioned in transcript)
 
 **Organizations & Institutions:**
-- **Name** - Purpose and relevance
+- **Name** - Purpose and relevance (ONLY if mentioned in transcript)
 
 **Recommended Resources:**
-- Any tools, websites, or materials suggested
+- Any tools, websites, or materials suggested (ONLY if mentioned in transcript)
 
 ---
 
