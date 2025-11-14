@@ -257,8 +257,35 @@ class ContentSummarizer:
 
     @staticmethod
     def _sanitize_filename(filename: str) -> str:
-        """Remove invalid characters from filename."""
+        """
+        Remove invalid characters from filename and normalize Unicode.
+
+        Converts curly quotes, em dashes, and other Unicode to ASCII equivalents.
+        """
+        # First, normalize common Unicode characters to ASCII
+        unicode_replacements = {
+            '\u2018': "'",  # Left single quote
+            '\u2019': "'",  # Right single quote
+            '\u201c': '"',  # Left double quote
+            '\u201d': '"',  # Right double quote
+            '\u2013': '-',  # En dash
+            '\u2014': '-',  # Em dash
+            '\u2026': '...',  # Ellipsis
+            '\u00a0': ' ',  # Non-breaking space
+        }
+
+        for unicode_char, ascii_char in unicode_replacements.items():
+            filename = filename.replace(unicode_char, ascii_char)
+
+        # Remove invalid filesystem characters
         invalid_chars = '<>:"/\\|?*'
         for char in invalid_chars:
             filename = filename.replace(char, '')
+
+        # Remove any remaining non-ASCII characters
+        filename = ''.join(char if ord(char) < 128 else '' for char in filename)
+
+        # Clean up multiple spaces
+        filename = ' '.join(filename.split())
+
         return filename[:200]  # Limit length

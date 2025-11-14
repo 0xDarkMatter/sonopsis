@@ -303,8 +303,8 @@ Examples:
 
     parser.add_argument(
         "--gpt-model",
-        default=os.getenv("SUMMARY_MODEL", "gpt-4o-mini"),
-        help="AI model for summarization (default: gpt-4o-mini)"
+        default=os.getenv("SUMMARY_MODEL", "claude-sonnet-4-5-20250929"),
+        help="AI model for summarization (default: claude-sonnet-4-5-20250929)"
     )
 
     parser.add_argument(

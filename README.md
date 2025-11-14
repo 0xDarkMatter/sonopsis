@@ -182,7 +182,7 @@ python main.py <URL> --keep-files
   - `elevenlabs`: Cloud transcription, paid, 99 languages, speaker diarization + audio events
 - `--whisper-model`: Whisper model size - `tiny`, `base`, `small`, `medium`, `large` (default: `base`)
   - Only applies to `whisper` and `whisperx` engines
-- `--gpt-model`: AI model for summaries (default: `gpt-4o-mini`)
+- `--gpt-model`: AI model for summaries (default: `claude-sonnet-4-5-20250929`)
   - OpenAI: `gpt-4o-mini`, `gpt-4o`, `gpt-5.1`
   - Anthropic Claude: `claude-haiku-4-5-20251001`, `claude-sonnet-4-5-20250929`
   - OpenRouter: `openrouter/moonshot/kimi-k2`, `openrouter/zhipuai/glm-4.6-plus`
