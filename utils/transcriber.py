@@ -472,25 +472,10 @@ class AudioTranscriber:
                 if language:
                     params["language_code"] = language
 
-                # Debug: Log parameters being sent
-                print(f"[DEBUG] API Parameters:")
-                print(f"[DEBUG]   model_id: {params.get('model_id')}")
-                print(f"[DEBUG]   diarize: {params.get('diarize')}")
-                print(f"[DEBUG]   diarization_threshold: {params.get('diarization_threshold')}")
-                print(f"[DEBUG]   tag_audio_events: {params.get('tag_audio_events')}")
-                print(f"[DEBUG]   additional_formats: {params.get('additional_formats')}")
-
                 response = client.speech_to_text.convert(**params)
 
             print(f"[+] Transcription complete!")
             print()
-
-            # Debug: Check response attributes
-            print(f"[DEBUG] Response attributes: {dir(response)}")
-            if hasattr(response, 'model_id'):
-                print(f"[DEBUG] Model used: {response.model_id}")
-            if hasattr(response, 'diarization_enabled'):
-                print(f"[DEBUG] Diarization enabled: {response.diarization_enabled}")
 
             # Extract transcript data from response with speaker diarization
             plain_text = ""
@@ -503,95 +488,63 @@ class AudioTranscriber:
                 # Find segmented_json (includes speaker labels AND timestamps)
                 json_format = None
                 for fmt in response.additional_formats:
-                    print(f"[DEBUG] Format: {fmt.requested_format}")
                     if hasattr(fmt, 'requested_format') and fmt.requested_format == 'segmented_json':
                         json_format = fmt
                         break
-
-                if json_format and hasattr(json_format, 'content'):
-                    import json as json_lib
-                    try:
-                        test_json = json_lib.loads(json_format.content)
-                        print(f"[DEBUG] JSON keys: {test_json.keys() if isinstance(test_json, dict) else 'Not a dict'}")
-                        if 'segments' in test_json and len(test_json['segments']) > 0:
-                            print(f"[DEBUG] First segment: {test_json['segments'][0]}")
-                    except:
-                        print(f"[DEBUG] First 500 chars of JSON:\n{json_format.content[:500]}")
 
                 # Parse segmented_json for speaker labels, audio events, and timestamps
                 if json_format and hasattr(json_format, 'content') and json_format.content:
                     import json as json_lib
                     json_data = json_lib.loads(json_format.content)
 
-                    # Parse SRT format (token-efficient AND preserves timestamps for YouTube bookmarks)
-                    # SRT format: subtitle blocks with timestamps and speaker labels
-                    # Example:
-                    # 1
-                    # 00:00:00,000 --> 00:00:05,000
-                    # [SPEAKER_01] Text here
-
+                    # Parse word-level data with speaker_id from segmented_json
+                    # Structure: {"segments": [{"words": [{"text": "I", "start": 11.76, "speaker_id": "speaker_0", ...}]}]}
                     transcript_lines = []
                     current_speaker = None
-                    current_text = []
-                    current_timestamp = None
+                    current_words = []
+                    current_start = None
 
-                    # Split into subtitle blocks (separated by blank lines)
-                    for block in srt_content.strip().split('\n\n'):
-                        lines = block.strip().split('\n')
-                        if len(lines) >= 3:
-                            # lines[0] = subtitle number
-                            # lines[1] = timestamp (e.g., "00:00:00,000 --> 00:00:05,000")
-                            # lines[2+] = text (may include speaker label)
+                    # Extract words with speaker_id and timestamps
+                    for segment in json_data.get('segments', []):
+                        for word in segment.get('words', []):
+                            word_type = word.get('type', 'word')
+                            speaker = word.get('speaker_id', 'speaker_0')
+                            word_text = word.get('text', '')
+                            word_start = word.get('start', 0)
 
-                            timestamp_line = lines[1]
-                            text = ' '.join(lines[2:]).strip()
-
-                            # Extract speaker if present (e.g., "[SPEAKER_01] text")
-                            speaker = "SPEAKER_00"  # Default
-                            if text.startswith('['):
-                                # Check if it's a speaker label or audio event
-                                end_bracket = text.find(']')
-                                if end_bracket > 0:
-                                    label = text[1:end_bracket]
-                                    # SPEAKER_XX are speaker labels, others are audio events
-                                    if label.startswith('SPEAKER_'):
-                                        speaker = label
-                                        text = text[end_bracket + 1:].strip()
-                                    # Keep audio events like [laughter], [music] in the text
-
-                            if not text:
+                            # Skip empty text but keep all types (words, spacing, punctuation, audio_events)
+                            if not word_text:
                                 continue
 
-                            # Parse timestamp to get start time in seconds
-                            # Format: "00:00:00,000 --> 00:00:05,000"
-                            start_time = timestamp_line.split(' --> ')[0]
-                            timestamp_seconds = self._parse_srt_timestamp(start_time)
-
-                            # Group by speaker
-                            if speaker != current_speaker:
-                                # New speaker - save previous and start new
-                                if current_text and current_timestamp is not None:
-                                    # Format: **[SPEAKER_01]** `[00:12:34]` Text here...
-                                    formatted_timestamp = self._format_timestamp(current_timestamp)
-                                    transcript_lines.append(
-                                        f"**[{current_speaker}]** `[{formatted_timestamp}]` {' '.join(current_text)}\n"
-                                    )
+                            # New speaker detected (only on word/audio_event, not spacing)
+                            if word_type in ['word', 'audio_event'] and speaker != current_speaker:
+                                # Save previous segment
+                                if current_words and current_start is not None:
+                                    timestamp = self._format_timestamp(current_start)
+                                    text = ''.join(current_words).strip()
+                                    if text:  # Only add non-empty segments
+                                        transcript_lines.append(
+                                            f"**[{current_speaker.upper()}]** `[{timestamp}]` {text}\n"
+                                        )
+                                # Start new segment
                                 current_speaker = speaker
-                                current_text = [text]
-                                current_timestamp = timestamp_seconds
+                                current_words = [word_text]
+                                current_start = word_start
                             else:
-                                # Same speaker - continue
-                                current_text.append(text)
+                                # Same speaker - continue (include ALL text: words, spacing, punctuation)
+                                current_words.append(word_text)
 
                     # Add final segment
-                    if current_text and current_timestamp is not None:
-                        formatted_timestamp = self._format_timestamp(current_timestamp)
-                        transcript_lines.append(
-                            f"**[{current_speaker}]** `[{formatted_timestamp}]` {' '.join(current_text)}\n"
-                        )
+                    if current_words and current_start is not None:
+                        timestamp = self._format_timestamp(current_start)
+                        text = ''.join(current_words).strip()
+                        if text:
+                            transcript_lines.append(
+                                f"**[{current_speaker.upper()}]** `[{timestamp}]` {text}\n"
+                            )
 
                     plain_text = '\n'.join(transcript_lines)
-                    print(f"[+] Speaker diarization and timestamps extracted")
+                    print(f"[+] Speaker diarization and timestamps extracted from word-level data")
                     print(f"[*] Timestamps preserved for YouTube bookmarks")
                 else:
                     # No SRT format, fall back to plain text
