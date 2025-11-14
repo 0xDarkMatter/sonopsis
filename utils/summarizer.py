@@ -291,10 +291,9 @@ class ContentSummarizer:
         # Section 3: Content Details
         tags = metadata.get('tags', [])
         categories = metadata.get('categories', [])
-        description = metadata.get('description', '')
         chapters = metadata.get('chapters', [])
 
-        if tags or categories or description or chapters:
+        if tags or categories or chapters:
             header_parts.append("### Content Details")
 
             if tags:
@@ -305,12 +304,6 @@ class ContentSummarizer:
 
             if categories:
                 header_parts.append(f"**Categories:** {', '.join(categories)}")
-
-            if description:
-                # Use full description
-                header_parts.append(f"**Description:**")
-                header_parts.append(f"{description}")
-                header_parts.append("")
 
             if chapters:
                 header_parts.append(f"**Chapters:** {len(chapters)} detected")
@@ -328,6 +321,14 @@ class ContentSummarizer:
         header_parts.append(f"**Summary Mode:** {mode_display}")
         header_parts.append(f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         header_parts.append("")
+
+        # Section 5: Video Description (if available and long)
+        description = metadata.get('description', '')
+        if description:
+            header_parts.append("### Video Description")
+            header_parts.append(description)
+            header_parts.append("")
+
         header_parts.append("---")
         header_parts.append("")
 
