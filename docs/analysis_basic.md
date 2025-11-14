@@ -82,11 +82,12 @@ Extract any:
 
 ### People & References
 
-**CRITICAL - ONLY INCLUDE WHAT IS ACTUALLY MENTIONED IN THE TRANSCRIPT:**
-- Do NOT add references that seem "relevant" but weren't explicitly mentioned
-- Do NOT hallucinate people, works, or organizations for context
-- Only list what speakers explicitly named or discussed
-- If unsure whether something was mentioned, leave it out
+**CRITICAL - ZERO TOLERANCE FOR HALLUCINATED REFERENCES:**
+- ONLY include what speakers EXPLICITLY MENTIONED by name in the transcript
+- Do NOT add references from your training data that seem "relevant"
+- Do NOT assume something was mentioned based on topic context
+- VERIFY: Can you find where the speaker said this name? If not, DO NOT INCLUDE IT
+- If unsure whether something was mentioned, LEAVE IT OUT
 
 List any:
 - Named individuals and their relevance (ONLY if mentioned)

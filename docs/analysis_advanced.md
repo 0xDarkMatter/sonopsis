@@ -124,11 +124,18 @@ Add enriching details when references are made, but keep them minimal and inline
 
 At the end, compile comprehensive lists:
 
-**CRITICAL - ONLY INCLUDE REFERENCES THAT ARE ACTUALLY MENTIONED IN THE TRANSCRIPT:**
-- Do NOT add people, works, or events that seem "relevant" but weren't mentioned
-- Do NOT hallucinate references for context
-- Only list what speakers explicitly named or discussed
-- If unsure, leave it out
+**CRITICAL - ZERO TOLERANCE FOR HALLUCINATED REFERENCES:**
+
+This is the #1 rule: ONLY include references that speakers EXPLICITLY MENTIONED by name in the transcript.
+
+- Do NOT add people/works/events from your training data that seem "relevant"
+- Do NOT add context that "should" be there based on the topic
+- Do NOT assume something was mentioned just because it's logically connected
+- VERIFY: Can you find the exact quote where the speaker said this name? If not, DO NOT INCLUDE IT
+
+**Validation rule:** For every person/work/organization listed, you must be able to point to where in the transcript the speaker said that name.
+
+If unsure whether something was mentioned, LEAVE IT OUT. An incomplete list is better than a hallucinated one.
 
 **People Mentioned:**
 - **Name** - Role/context, dates if relevant (ONLY if mentioned in transcript)
