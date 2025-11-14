@@ -190,6 +190,67 @@ class ContentSummarizer:
         with open(system_prompt_file, 'r', encoding='utf-8') as f:
             return f.read().strip()
 
+    def _identify_speakers(self, transcript: str, metadata: Dict[str, any]) -> str:
+        """
+        Analyze transcript and metadata to identify speakers.
+
+        Args:
+            transcript: Full transcript with SPEAKER_X labels
+            metadata: Video metadata including title, description
+
+        Returns:
+            Speaker mapping guidance string to inject into prompt
+        """
+        import re
+
+        # Extract first 3000 characters of transcript for analysis
+        transcript_sample = transcript[:3000]
+
+        # Find all unique SPEAKER_X labels
+        speakers = set(re.findall(r'\*\*\[SPEAKER_(\d+)\]', transcript_sample))
+
+        if not speakers:
+            return ""
+
+        # Build analysis prompt
+        mapping_prompt = "\n\n**SPEAKER MAPPING ASSISTANCE:**\n\n"
+        mapping_prompt += f"The transcript contains {len(speakers)} speakers: " + ", ".join(f"SPEAKER_{s}" for s in sorted(speakers)) + "\n\n"
+
+        # Add metadata clues
+        title = metadata.get('title', '')
+        description = metadata.get('description', '')
+        uploader = metadata.get('uploader', '')
+
+        if title:
+            mapping_prompt += f"**Video Title:** {title}\n"
+        if uploader:
+            mapping_prompt += f"**Channel:** {uploader}\n"
+
+        # Extract name clues from title and description
+        if description:
+            # Look for common patterns: "with X and Y", "X speaks with Y", etc.
+            name_patterns = [
+                r'with ([A-Z][a-z]+ [A-Z][a-z]+) and ([A-Z][a-z]+ [A-Z][a-z]+)',
+                r'([A-Z][a-z]+ [A-Z][a-z]+) and ([A-Z][a-z]+ [A-Z][a-z]+)',
+                r'featuring ([A-Z][a-z]+ [A-Z][a-z]+)',
+            ]
+
+            for pattern in name_patterns:
+                matches = re.findall(pattern, description[:500])
+                if matches:
+                    mapping_prompt += f"\n**Names mentioned in description:** {', '.join(sum(matches, ()) if isinstance(matches[0], tuple) else matches)}\n"
+                    break
+
+        # Show first few speaker segments
+        mapping_prompt += "\n**First speaker segments for analysis:**\n"
+        segments = re.findall(r'\*\*\[(SPEAKER_\d+)\]\*\*.{0,150}', transcript_sample)
+        for i, segment in enumerate(segments[:15], 1):
+            mapping_prompt += f"{i}. {segment}...\n"
+
+        mapping_prompt += "\n**Use this information to map SPEAKER_X labels to actual names in your summary.**\n"
+
+        return mapping_prompt
+
     def _create_summary_prompt(self, transcript: str, metadata: Dict[str, any],
                                analysis_mode: str = "advanced") -> str:
         """
@@ -217,6 +278,9 @@ class ContentSummarizer:
         url = metadata.get('url', 'N/A')
         video_id = self._extract_video_id(url) if url != 'N/A' else 'N/A'
 
+        # Generate speaker mapping assistance
+        speaker_mapping = self._identify_speakers(transcript, metadata)
+
         # Replace placeholders
         prompt = template.format(
             title=metadata.get('title', 'Unknown'),
@@ -226,6 +290,10 @@ class ContentSummarizer:
             video_id=video_id,
             transcript=transcript
         )
+
+        # Append speaker mapping guidance
+        if speaker_mapping:
+            prompt = prompt + speaker_mapping
 
         return prompt
 
