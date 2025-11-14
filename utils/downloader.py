@@ -9,6 +9,7 @@ import yt_dlp
 from pathlib import Path
 from typing import Dict, Optional
 from colorama import Fore, Style
+import re
 
 
 class YouTubeDownloader:
@@ -76,10 +77,26 @@ class YouTubeDownloader:
         Raises:
             Exception: If download fails
         """
-        # Configure download options
+        # Extract video ID first
+        video_id = self._extract_video_id(url)
+        if not video_id:
+            raise Exception("Could not extract video ID from URL")
+
+        # Check for existing files
+        existing_files = list(self.output_dir.glob(f"YT_{video_id}_*.mp3"))
+        if existing_files:
+            print(f"\n{Fore.YELLOW}[!] Audio file already exists: {existing_files[0].name}{Style.RESET_ALL}")
+            response = input(f"{Fore.CYAN}Use downloaded source? (Y/N): {Style.RESET_ALL}").strip().upper()
+
+            if response == 'Y':
+                print(f"{Fore.GREEN}[+] Using existing audio file{Style.RESET_ALL}\n")
+                # Get metadata without downloading
+                return self._get_metadata_for_existing_file(url, existing_files[0])
+
+        # Configure download options with YT_{ID}_{Title} naming
         ydl_opts = {
             'format': 'bestaudio/best' if audio_only else 'best',
-            'outtmpl': str(self.output_dir / '%(title).200B.%(ext)s'),
+            'outtmpl': str(self.output_dir / f'YT_{video_id}_%(title).180B.%(ext)s'),
             'quiet': True,
             'no_warnings': True,
             'socket_timeout': 30,
@@ -125,6 +142,12 @@ class YouTubeDownloader:
                     'upload_date': info.get('upload_date', 'Unknown'),
                     'description': info.get('description', ''),
                     'view_count': info.get('view_count', 0),
+                    'like_count': info.get('like_count', 0),
+                    'channel_url': info.get('channel_url', ''),
+                    'tags': info.get('tags', []),
+                    'categories': info.get('categories', []),
+                    'chapters': info.get('chapters', []),
+                    'language': info.get('language', ''),
                     'audio_file': str(audio_file),
                     'url': url
                 }
@@ -160,6 +183,79 @@ class YouTubeDownloader:
                 }
         except Exception as e:
             raise Exception(f"Failed to get video info: {str(e)}")
+
+    def _extract_video_id(self, url: str) -> Optional[str]:
+        """
+        Extract YouTube video ID from URL.
+
+        Args:
+            url: YouTube video URL
+
+        Returns:
+            Video ID string (11 characters) or None if not found
+        """
+        # Handle different YouTube URL formats
+        patterns = [
+            r'(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})',
+            r'youtube\.com\/embed\/([a-zA-Z0-9_-]{11})',
+            r'youtube\.com\/v\/([a-zA-Z0-9_-]{11})'
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, url)
+            if match:
+                return match.group(1)
+
+        return None
+
+    def _get_metadata_for_existing_file(self, url: str, audio_file: Path) -> Dict[str, str]:
+        """
+        Get video metadata without downloading (for existing files).
+
+        Args:
+            url: YouTube video URL
+            audio_file: Path to existing audio file
+
+        Returns:
+            Dictionary containing file paths and video metadata
+        """
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+        }
+
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+
+                # Sanitize title for safe handling
+                title = info.get('title', 'Unknown')
+                try:
+                    title.encode('utf-8')
+                except (UnicodeEncodeError, UnicodeDecodeError, AttributeError):
+                    title = 'Video'
+
+                result = {
+                    'title': title,
+                    'duration': info.get('duration', 0),
+                    'uploader': info.get('uploader', 'Unknown'),
+                    'upload_date': info.get('upload_date', 'Unknown'),
+                    'description': info.get('description', ''),
+                    'view_count': info.get('view_count', 0),
+                    'like_count': info.get('like_count', 0),
+                    'channel_url': info.get('channel_url', ''),
+                    'tags': info.get('tags', []),
+                    'categories': info.get('categories', []),
+                    'chapters': info.get('chapters', []),
+                    'language': info.get('language', ''),
+                    'audio_file': str(audio_file),
+                    'url': url
+                }
+
+                return result
+
+        except Exception as e:
+            raise Exception(f"Failed to get video metadata: {str(e)}")
 
     def is_playlist(self, url: str) -> bool:
         """
