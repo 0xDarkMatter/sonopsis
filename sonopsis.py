@@ -598,13 +598,13 @@ def select_summary_model():
     print(f"{Fore.YELLOW}{'─'*70}{Style.RESET_ALL}")
 
     while True:
-        choice = input(f"\n{Fore.WHITE}Select model (1-{len(models)}) [default: Claude Haiku if available, else gpt-4o-mini]: {Style.RESET_ALL}").strip()
+        choice = input(f"\n{Fore.WHITE}Select model (1-{len(models)}) [default: Claude Sonnet 4.5]: {Style.RESET_ALL}").strip()
 
         if not choice:
-            # Default to Claude Haiku if available, else gpt-4o-mini
+            # Default to Claude Sonnet 4.5 if available
             if has_anthropic:
                 for k, v in models.items():
-                    if 'haiku' in v['name']:
+                    if 'claude-sonnet-4-5-20250929' == v['id']:
                         choice = k
                         break
             else:
