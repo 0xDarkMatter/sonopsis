@@ -33,13 +33,37 @@ Analyze this video/podcast transcript and create a detailed, information-dense s
 
 ---
 
-**SPEAKER IDENTIFICATION PROTOCOL**
+**SPEAKER IDENTIFICATION PROTOCOL - CRITICAL**
 
-Use bracket notation for all speaker names: [John Doe], [Jane Smith]
-- Try to identify speakers from video title, creator name ({uploader}), or transcript context
-- Use numbered placeholders if unknown: [speaker01], [speaker02], [speaker03]
-- Maintain consistency throughout
-See full protocol for details.
+The transcript contains automatic speaker labels like **[SPEAKER_0]**, **[SPEAKER_1]**, **[SPEAKER_2]**, etc.
+
+**YOUR TASK: Map every SPEAKER_X label to actual names**
+
+**Step 1: Identify ALL speakers**
+- Read the first 10-15 speaker segments of the transcript carefully
+- Note who asks questions (interviewers/hosts) vs who provides long answers (subjects)
+- Look for self-introductions: "My name is...", "I'm...", "This is..."
+- Look for names mentioned in dialogue: "Jeremy asks...", "As George said..."
+- Check video title: "{title}" - often includes speaker names
+- Check channel name: "{uploader}" - may indicate host/creator
+- Check video description (if provided) - often lists participants
+
+**Step 2: Analyze speaking patterns**
+- **SPEAKER_0** is often the main subject (longest segments, answers questions)
+- **SPEAKER_1** and **SPEAKER_2** are often co-hosts/interviewers (ask questions, shorter segments)
+- If someone refers to another person by name ("Jeremy", "George"), that person is likely another SPEAKER_X
+
+**Step 3: Create mapping**
+Example:
+- SPEAKER_0 = [Dylan Borland] (says "My name is Dylan Borland")
+- SPEAKER_1 = [George Knapp] (asks questions, Dylan says "you and George")
+- SPEAKER_2 = [Jeremy Corbell] (referred to as "Jeremy", co-host)
+
+**Step 4: Use bracket notation consistently**
+- Once identified: [Dylan Borland], [George Knapp], [Jeremy Corbell]
+- If still unknown after analysis: [speaker01], [speaker02], [speaker03]
+
+**CRITICAL: Do NOT skip any speakers - if you see SPEAKER_1, SPEAKER_2, etc., ALL must be identified and used in the summary!**
 
 ---
 
