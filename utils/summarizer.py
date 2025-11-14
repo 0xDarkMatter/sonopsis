@@ -94,7 +94,11 @@ class ContentSummarizer:
             if self.api_type == 'anthropic':
                 # Claude requires max_tokens parameter - use model maximum
                 # Sonnet 4.5 supports up to 64K output tokens
-                response = self.client.messages.create(
+                # Use streaming to avoid 10-minute timeout for long generations
+                print(f"[*] Generating (this may take several minutes for long videos)...")
+
+                summary_content = ""
+                with self.client.messages.stream(
                     model=self.model,
                     max_tokens=64000,  # Claude Sonnet 4.5 maximum output capacity
                     temperature=0.7,
@@ -105,8 +109,9 @@ class ContentSummarizer:
                             "content": prompt
                         }
                     ]
-                )
-                summary_content = response.content[0].text
+                ) as stream:
+                    for text in stream.text_stream:
+                        summary_content += text
             else:
                 # OpenAI API (also used by OpenRouter with compatible interface)
                 completion_params = {
