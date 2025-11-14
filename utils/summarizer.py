@@ -27,8 +27,9 @@ class ContentSummarizer:
         Args:
             api_key: API key (if None, reads from environment based on model)
             model: Model to use. Options:
-                   - OpenAI: gpt-4o-mini, gpt-4o, gpt-5
+                   - OpenAI: gpt-4o-mini, gpt-4o, gpt-5.1
                    - Anthropic: claude-sonnet-4-5-20250929, claude-haiku-4-5-20251001, claude-sonnet-4, claude-opus-4-1
+                   - OpenRouter: openrouter/moonshot/kimi-k2, openrouter/zhipuai/glm-4.6-plus
             output_dir: Directory to save summaries
         """
         self.model = model
@@ -44,6 +45,22 @@ class ContentSummarizer:
             if not self.api_key:
                 raise ValueError("Anthropic API key not found. Set ANTHROPIC_API_KEY environment variable.")
             self.client = Anthropic(api_key=self.api_key)
+        elif model.startswith('openrouter/'):
+            # OpenRouter uses OpenAI-compatible API
+            self.api_type = 'openrouter'
+            self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
+            if not self.api_key:
+                raise ValueError("OpenRouter API key not found. Set OPENROUTER_API_KEY environment variable.")
+            # Strip the openrouter/ prefix for the actual API call
+            self.model = model.replace('openrouter/', '', 1)
+            self.client = OpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=self.api_key,
+                default_headers={
+                    "HTTP-Referer": "https://github.com/yourusername/sonopsis",  # Optional, for rankings
+                    "X-Title": "Sonopsis"  # Optional, shows in OpenRouter rankings
+                }
+            )
         else:
             self.api_type = 'openai'
             self.api_key = api_key or os.getenv("OPENAI_API_KEY")
@@ -66,6 +83,9 @@ class ContentSummarizer:
         """
         print(f"[*] Generating summary using {self.model} ({analysis_mode} mode)")
 
+        # Load system prompt from external file
+        system_prompt = self._load_system_prompt()
+
         # Create the prompt
         prompt = self._create_summary_prompt(transcript, video_metadata, analysis_mode)
 
@@ -76,7 +96,7 @@ class ContentSummarizer:
                     model=self.model,
                     max_tokens=4000,
                     temperature=0.7,
-                    system="You are an expert at analyzing video and podcast content, creating comprehensive, well-structured summaries and notes. You excel at identifying speakers, capturing conversational nuances, extracting key insights, and organizing information clearly. You notice tone, emphasis, and the flow of discussions.",
+                    system=system_prompt,
                     messages=[
                         {
                             "role": "user",
@@ -86,14 +106,14 @@ class ContentSummarizer:
                 )
                 summary_content = response.content[0].text
             else:
-                # OpenAI API
-                # GPT-5 uses max_completion_tokens instead of max_tokens
+                # OpenAI API (also used by OpenRouter with compatible interface)
+                # GPT-5.x uses max_completion_tokens instead of max_tokens
                 completion_params = {
                     "model": self.model,
                     "messages": [
                         {
                             "role": "system",
-                            "content": "You are an expert at analyzing video and podcast content, creating comprehensive, well-structured summaries and notes. You excel at identifying speakers, capturing conversational nuances, extracting key insights, and organizing information clearly. You notice tone, emphasis, and the flow of discussions."
+                            "content": system_prompt
                         },
                         {
                             "role": "user",
@@ -103,11 +123,11 @@ class ContentSummarizer:
                     "temperature": 0.7
                 }
 
-                # GPT-5 and reasoning models have different parameter requirements
+                # GPT-5.x and reasoning models have different parameter requirements
                 if self.model.startswith('gpt-5') or self.model.startswith('o1') or self.model.startswith('o3'):
-                    # GPT-5 requires max_completion_tokens and temperature=1 (default only)
+                    # GPT-5.x requires max_completion_tokens and temperature=1 (default only)
                     completion_params["max_completion_tokens"] = 4000
-                    completion_params["temperature"] = 1  # GPT-5 only supports default temperature
+                    completion_params["temperature"] = 1  # GPT-5.x only supports default temperature
                 else:
                     completion_params["max_tokens"] = 2000
 
@@ -133,6 +153,22 @@ class ContentSummarizer:
 
         except Exception as e:
             raise Exception(f"Summarization failed: {str(e)}")
+
+    def _load_system_prompt(self) -> str:
+        """
+        Load the system prompt from external file.
+
+        Returns:
+            System prompt string
+        """
+        system_prompt_file = Path(__file__).parent.parent / "docs" / "system_prompt.md"
+
+        if not system_prompt_file.exists():
+            raise FileNotFoundError(f"System prompt file not found: {system_prompt_file}")
+
+        # Load system prompt from file
+        with open(system_prompt_file, 'r', encoding='utf-8') as f:
+            return f.read().strip()
 
     def _create_summary_prompt(self, transcript: str, metadata: Dict[str, any],
                                analysis_mode: str = "advanced") -> str:

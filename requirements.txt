@@ -9,6 +9,9 @@ torchaudio>=2.0.0
 # Optional: WhisperX with speaker diarization (requires HF token)
 # whisperx>=3.7.0
 
+# Cloud transcription services
+elevenlabs>=1.0.0
+
 # AI summarization
 openai>=1.0.0
 anthropic>=0.18.0

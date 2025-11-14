@@ -285,30 +285,52 @@ def select_transcription_mode_menu():
     import torch
 
     has_hf_token = bool(os.getenv("HF_TOKEN"))
+    has_elevenlabs_key = bool(os.getenv("ELEVENLABS_API_KEY"))
     has_gpu = torch.cuda.is_available()
 
     menu_items = [
-        "Whisper - Standard transcription (no speaker labels)",
-        "WhisperX - Enhanced transcription with speaker diarization" + ("" if has_hf_token else " [Requires HF_TOKEN]")
+        "Whisper - Local transcription (free, no speaker labels)",
+        "WhisperX - Local with speaker diarization (free)" + ("" if has_hf_token else " [Requires HF_TOKEN]"),
+        "ElevenLabs - Cloud transcription (paid, 99 languages, speaker diarization)" + ("" if has_elevenlabs_key else " [Requires API Key]")
     ]
 
-    # Show warning about WhisperX performance
+    # Show performance info
     if not has_gpu:
         print(f"\n{Fore.YELLOW}Note: No GPU detected - running on CPU{Style.RESET_ALL}")
         print(f"{Fore.YELLOW}      WhisperX will be 3-5x slower than Whisper on CPU{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}      Recommend: Use vanilla Whisper for faster transcription{Style.RESET_ALL}\n")
+        print(f"{Fore.YELLOW}      Recommend: Use vanilla Whisper for faster local transcription{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}      Or use ElevenLabs for cloud-based transcription (~$0.22-0.48/hour){Style.RESET_ALL}\n")
     else:
         print(f"\n{Fore.GREEN}GPU detected - WhisperX will run efficiently{Style.RESET_ALL}\n")
 
-    selected = show_menu("Select Transcription Mode", menu_items, default_selected=0)  # Default to Whisper
-    use_whisperx = (selected == 1)
+    selected = show_menu("Select Transcription Engine", menu_items, default_selected=0)  # Default to Whisper
 
-    # If WhisperX selected but no token, prompt for it
-    if use_whisperx and not has_hf_token:
-        token = prompt_for_hf_token()
-        # Token is now saved and env reloaded, continue with WhisperX
+    # Map selection to engine name
+    if selected == 0:
+        engine = "whisper"
+    elif selected == 1:
+        engine = "whisperx"
+        # If WhisperX selected but no token, prompt for it
+        if not has_hf_token:
+            token = prompt_for_hf_token()
+            # Token is now saved and env reloaded, continue with WhisperX
+    else:  # selected == 2
+        engine = "elevenlabs"
+        # If ElevenLabs selected but no API key, show warning
+        if not has_elevenlabs_key:
+            print(f"\n{Fore.YELLOW}{'='*70}")
+            print(f"{Fore.YELLOW}[!] ElevenLabs API Key Required{Style.RESET_ALL}")
+            print(f"{Fore.YELLOW}{'='*70}{Style.RESET_ALL}\n")
+            print(f"{Fore.CYAN}To use ElevenLabs transcription:{Style.RESET_ALL}")
+            print(f"{Fore.CYAN}1. Sign up at: https://elevenlabs.io{Style.RESET_ALL}")
+            print(f"{Fore.CYAN}2. Get your API key from the dashboard{Style.RESET_ALL}")
+            print(f"{Fore.CYAN}3. Add to .env file: ELEVENLABS_API_KEY=your_key_here{Style.RESET_ALL}\n")
+            print(f"{Fore.YELLOW}Transcription will fail without a valid API key.{Style.RESET_ALL}")
+            print(f"{Fore.YELLOW}Press any key to continue anyway...{Style.RESET_ALL}")
+            import msvcrt
+            msvcrt.getch()
 
-    return use_whisperx  # Returns True for WhisperX, False for vanilla Whisper
+    return engine  # Returns "whisper", "whisperx", or "elevenlabs"
 
 
 def select_analysis_mode_menu():
@@ -596,7 +618,7 @@ def select_summary_model():
         print(f"{Fore.RED}[!] Invalid choice. Please enter 1-{len(models)}.{Style.RESET_ALL}")
 
 
-def process_single_video(url, whisper_model, summary_model, analysis_mode, keep_files, download_video=False, use_whisperx=False, video_num=None, total_videos=None):
+def process_single_video(url, whisper_model, summary_model, analysis_mode, keep_files, download_video=False, transcription_engine="whisper", video_num=None, total_videos=None):
     """Process a single video with selected models."""
 
     # Add video counter to header if processing multiple videos
@@ -613,13 +635,25 @@ def process_single_video(url, whisper_model, summary_model, analysis_mode, keep_
         print(f"{Fore.CYAN}[+] Download complete{Style.RESET_ALL}\n")
 
         # Step 2: Transcribe
-        transcription_type = "WhisperX" if use_whisperx else "Whisper"
-        print(f"{Fore.CYAN}[2/3] Transcribing audio with {transcription_type} ({whisper_model} model)...{Style.RESET_ALL}")
+        # Map engine to display name
+        engine_names = {
+            "whisper": "Whisper",
+            "whisperx": "WhisperX",
+            "elevenlabs": "ElevenLabs"
+        }
+        transcription_type = engine_names.get(transcription_engine, "Whisper")
+
+        # Show model info for local engines, skip for ElevenLabs
+        model_info = f" ({whisper_model} model)" if transcription_engine != "elevenlabs" else ""
+        print(f"{Fore.CYAN}[2/3] Transcribing audio with {transcription_type}{model_info}...{Style.RESET_ALL}")
+
         transcriber = AudioTranscriber(
             model_name=whisper_model,
             output_dir="transcripts",
-            use_whisperx=use_whisperx,
-            hf_token=os.getenv("HF_TOKEN")
+            use_whisperx=(transcription_engine == "whisperx"),
+            hf_token=os.getenv("HF_TOKEN"),
+            use_elevenlabs=(transcription_engine == "elevenlabs"),
+            elevenlabs_api_key=os.getenv("ELEVENLABS_API_KEY")
         )
         transcript_data = transcriber.transcribe(video_data['audio_file'])
         print(f"{Fore.CYAN}[+] Transcription complete ({transcript_data['language']}){Style.RESET_ALL}\n")
@@ -675,7 +709,7 @@ def process_single_video(url, whisper_model, summary_model, analysis_mode, keep_
         }
 
 
-def process_playlist(url, whisper_model, summary_model, analysis_mode, keep_files, download_video=False, use_whisperx=False):
+def process_playlist(url, whisper_model, summary_model, analysis_mode, keep_files, download_video=False, transcription_engine="whisper"):
     """Process all videos in a playlist."""
     try:
         # Get playlist videos
@@ -687,12 +721,19 @@ def process_playlist(url, whisper_model, summary_model, analysis_mode, keep_file
             return False
 
         # Show playlist summary
-        transcription_type = "WhisperX" if use_whisperx else "Whisper"
+        engine_names = {
+            "whisper": "Whisper",
+            "whisperx": "WhisperX",
+            "elevenlabs": "ElevenLabs"
+        }
+        transcription_type = engine_names.get(transcription_engine, "Whisper")
+        model_info = f" ({whisper_model})" if transcription_engine != "elevenlabs" else ""
+
         print(f"\n{Fore.CYAN}{'='*70}")
         print(f"{Fore.CYAN}  PLAYLIST SUMMARY")
         print(f"{Fore.CYAN}{'='*70}{Style.RESET_ALL}\n")
         print(f"{Fore.CYAN}Total videos: {len(videos)}")
-        print(f"{Fore.CYAN}Transcription: {transcription_type} ({whisper_model})")
+        print(f"{Fore.CYAN}Transcription: {transcription_type}{model_info}")
         print(f"{Fore.CYAN}AI model: {summary_model}")
         print(f"{Fore.CYAN}Analysis mode: {analysis_mode}\n")
 
@@ -720,7 +761,7 @@ def process_playlist(url, whisper_model, summary_model, analysis_mode, keep_file
                 analysis_mode,
                 keep_files,
                 download_video,
-                use_whisperx,
+                transcription_engine,
                 video_num=idx,
                 total_videos=len(videos)
             )
@@ -767,11 +808,14 @@ def main():
             print(f"\n{Fore.CYAN}Thanks for using Sonopsis!{Style.RESET_ALL}\n")
             sys.exit(0)
 
-        # Step 2: Select transcription mode (Whisper vs WhisperX)
-        use_whisperx = select_transcription_mode_menu()
+        # Step 2: Select transcription engine (Whisper / WhisperX / ElevenLabs)
+        transcription_engine = select_transcription_mode_menu()
 
-        # Step 3: Select Whisper model
-        whisper_model = select_whisper_model_menu()
+        # Step 3: Select Whisper model (skip for ElevenLabs)
+        if transcription_engine == "elevenlabs":
+            whisper_model = "base"  # Not used for ElevenLabs, but needed for function signature
+        else:
+            whisper_model = select_whisper_model_menu()
 
         # Step 4: Select AI model
         summary_model = select_summary_model_menu()
@@ -802,9 +846,9 @@ def main():
         # Process based on type
         print(f"\n{Fore.CYAN}Starting processing...{Style.RESET_ALL}\n")
         if is_playlist:
-            process_playlist(url, whisper_model, summary_model, analysis_mode, keep_files, download_video, use_whisperx)
+            process_playlist(url, whisper_model, summary_model, analysis_mode, keep_files, download_video, transcription_engine)
         else:
-            process_single_video(url, whisper_model, summary_model, analysis_mode, keep_files, download_video, use_whisperx)
+            process_single_video(url, whisper_model, summary_model, analysis_mode, keep_files, download_video, transcription_engine)
 
         print(f"\n{Fore.CYAN}{'─' * 70}{Style.RESET_ALL}\n")
 

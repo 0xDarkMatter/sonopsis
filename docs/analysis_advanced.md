@@ -30,6 +30,16 @@ Transform this transcript into a readable "book version" of the podcast - mainta
 
 ---
 
+**SPEAKER IDENTIFICATION PROTOCOL**
+
+Use bracket notation for all speaker names: [John Doe], [Jane Smith]
+- Try to identify speakers from video title, creator name ({uploader}), or transcript context
+- Use numbered placeholders if unknown: [speaker01], [speaker02], [speaker03]
+- Maintain consistency throughout the narrative
+See full protocol for details.
+
+---
+
 **TRANSFORMATION REQUIREMENTS**
 
 Your goal is to create a chronological narrative that someone can read 5x faster than listening, while retaining complete fidelity. Think of this as the "book version" of the podcast - following the same flow but with enhanced readability and enriched references.
@@ -71,6 +81,15 @@ Select 3-5 of the most significant, memorable, or revealing quotes. Choose quote
 - Are self-contained and meaningful
 - Represent important perspectives or claims
 
+**Speaker Identification:**
+- Use brackets for ALL speaker names: [John Doe], [Jane Smith]
+- Attempt to identify speakers from context: video title, channel name, subject matter, or any introductions in the transcript
+- If the speaker's name cannot be identified, use numbered placeholders: [speaker01], [speaker02], [speaker03] etc
+- Placeholders make it easy to search and replace with actual names later
+
+Format each as:
+> "Exact quote here" - [Speaker Name] or [speaker01]
+
 
 ### 3. Main Content (Chronological Narrative)
 
@@ -91,7 +110,9 @@ Organize following the natural flow of the discussion, using these principles:
 
 **For Interviews/Conversations:**
 - Organize chronologically by topic flow, not speaker turns
-- Attribute perspectives naturally: "Smith argues that..." or "According to Jones..."
+- Attribute perspectives using bracket notation: "[John Smith] argues that..." or "According to [Sarah Jones]..."
+- Try to identify speakers from video title, channel name, or context in the transcript
+- If speaker cannot be identified, use placeholders: "[speaker01] argues that..." or "According to [speaker02]..."
 - Preserve the back-and-forth when it reveals important dialectic
 
 **Enhanced Context:**
@@ -129,6 +150,14 @@ At the end, compile comprehensive lists:
 4. Use > blockquotes for the 3-5 key quotes section only
 5. Inline brackets [like this] for enhanced references and context
 6. Preserve numbering if speaker uses it (3 principles, 5 stages, etc.)
+
+**TIMESTAMP USAGE (when available in transcript)**
+
+If the transcript includes timestamps (e.g., `[00:12:34]`), use them to create YouTube bookmark links:
+- Format: `[HH:MM:SS](https://youtu.be/{video_id}?t=XXXs)` where XXX is total seconds
+- Example: `[00:12:34](https://youtu.be/{video_id}?t=754s)` creates a clickable timestamp
+- Weave timestamps naturally into the narrative when discussing specific moments
+- This allows readers to jump directly to relevant sections while reading
 
 
 

@@ -31,10 +31,20 @@ Analyze this video/podcast transcript and create a detailed, information-dense s
 
 ---
 
+**SPEAKER IDENTIFICATION PROTOCOL**
+
+Use bracket notation for all speaker names: [John Doe], [Jane Smith]
+- Try to identify speakers from video title, creator name ({uploader}), or transcript context
+- Use numbered placeholders if unknown: [speaker01], [speaker02], [speaker03]
+- Maintain consistency throughout
+See full protocol for details.
+
+---
+
 **ANALYSIS REQUIREMENTS**
 
-## 1. Overview (2-3 sentences)
-Provide a high-density summary that captures the core purpose and key message. Avoid generic language - be specific about what makes this content unique or valuable.
+## 1. Overview (1-3 paragraphs)
+Provide a deteailed summary that captures the core purpose and key messages. Avoid generic language - be specific about what makes this content unique or valuable.
 
 ## 2. Key Quotes (3-5 selections)
 Select 3-5 of the most significant, memorable, or revealing quotes from the content. Choose quotes that:
@@ -43,8 +53,14 @@ Select 3-5 of the most significant, memorable, or revealing quotes from the cont
 - Represent important perspectives or claims
 - Would make good pull-quotes or highlights
 
+**Speaker Identification:**
+- Use brackets for ALL speaker names: [John Doe], [Jane Smith]
+- Attempt to identify speakers from context: video title, channel name, subject matter, or any introductions in the transcript
+- If the speaker's name cannot be identified, use numbered placeholders: [speaker01], [speaker02], [speaker03] etc
+- Placeholders make it easy to search and replace with actual names later
+
 Format each as:
-> "Exact quote here"
+> "Exact quote here" - [Speaker Name] or [speaker01]
 
 ## 3. Content Structure
 
@@ -88,4 +104,12 @@ For each insight:
 4. Be specific - include names, numbers, and concrete details
 5. Avoid filler phrases like "the speaker discusses" or "talks about"
 6. Keep language precise and information-dense
+
+**TIMESTAMP USAGE (when available in transcript)**
+
+If the transcript includes timestamps (e.g., `[00:12:34]`), use them to create YouTube bookmark links:
+- Format: `[HH:MM:SS](https://youtu.be/{video_id}?t=XXXs)` where XXX is total seconds
+- Example: `[00:12:34](https://youtu.be/{video_id}?t=754s)` creates a clickable timestamp
+- Use timestamps to cite specific moments when discussing key points or quotes
+- This allows readers to jump directly to relevant sections of the video
 
