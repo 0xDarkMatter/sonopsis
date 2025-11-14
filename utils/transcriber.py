@@ -456,7 +456,7 @@ class AudioTranscriber:
                     "model_id": "scribe_v2",  # Use latest V2 model
                     "file": audio_file,
                     "diarize": True,  # Enable speaker diarization
-                    "diarization_threshold": 0.1,  # Minimum threshold = maximum sensitivity (range: 0.1-0.4, default: 0.22)
+                    "diarization_threshold": 0.15,  # Balanced threshold (range: 0.1-0.4, default: 0.22)
                     "tag_audio_events": True,  # Enable laughter, applause, etc.
                     "additional_formats": [
                         {"format": "srt"},  # For timestamps
@@ -466,7 +466,7 @@ class AudioTranscriber:
                 # Note: diarization_threshold can only be set when num_speakers=None
                 # Lower threshold = more speakers detected (risk: may split one speaker into multiple)
                 # Higher threshold = fewer speakers detected (risk: may merge different speakers into one)
-                # Using 0.1 (minimum) to force maximum speaker separation
+                # Using 0.15 for balanced detection - reduces over-segmentation while still detecting genuine speakers
 
                 # Only add language_code if explicitly provided (omit for auto-detect)
                 if language:

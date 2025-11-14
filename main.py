@@ -107,10 +107,16 @@ def process_single_video(url: str, whisper_model: str = "base", gpt_model: str =
             'title': video_data['title'],
             'uploader': video_data['uploader'],
             'duration': video_data['duration'],
-            'url': video_data['url']
+            'url': video_data['url'],
+            'whisper_model': whisper_model
         }
 
-        summary_data = summarizer.summarize(transcript_data['text'], metadata, analysis_mode)
+        summary_data = summarizer.summarize(
+            transcript_data['text'],
+            metadata,
+            analysis_mode,
+            transcription_engine=transcription_engine
+        )
         print_success("Summary generated")
 
         # Cleanup
