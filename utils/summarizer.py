@@ -314,20 +314,20 @@ class ContentSummarizer:
 
             header_parts.append("")
 
-        # Section 4: Processing Information
+        # Section 4: Video Description (if available)
+        description = metadata.get('description', '')
+        if description:
+            header_parts.append("### Video Description")
+            header_parts.append(description)
+            header_parts.append("")
+
+        # Section 5: Processing Information
         header_parts.append("### Processing Information")
         header_parts.append(f"**Transcription Model:** {transcription_display}")
         header_parts.append(f"**Summarization Model:** {summary_display}")
         header_parts.append(f"**Summary Mode:** {mode_display}")
         header_parts.append(f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         header_parts.append("")
-
-        # Section 5: Video Description (if available and long)
-        description = metadata.get('description', '')
-        if description:
-            header_parts.append("### Video Description")
-            header_parts.append(description)
-            header_parts.append("")
 
         header_parts.append("---")
         header_parts.append("")
