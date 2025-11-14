@@ -458,7 +458,10 @@ class AudioTranscriber:
                     "diarize": True,  # Enable speaker diarization
                     "diarization_threshold": 0.1,  # Minimum threshold = maximum sensitivity (range: 0.1-0.4, default: 0.22)
                     "tag_audio_events": True,  # Enable laughter, applause, etc.
-                    "additional_formats": [{"format": "srt"}]  # Request SRT format (much more token-efficient than JSON)
+                    "additional_formats": [
+                        {"format": "srt"},  # For timestamps
+                        {"format": "segmented_json"}  # For speaker labels (SRT doesn't include them!)
+                    ]
                 }
                 # Note: diarization_threshold can only be set when num_speakers=None
                 # Lower threshold = more speakers detected (risk: may split one speaker into multiple)
@@ -469,10 +472,25 @@ class AudioTranscriber:
                 if language:
                     params["language_code"] = language
 
+                # Debug: Log parameters being sent
+                print(f"[DEBUG] API Parameters:")
+                print(f"[DEBUG]   model_id: {params.get('model_id')}")
+                print(f"[DEBUG]   diarize: {params.get('diarize')}")
+                print(f"[DEBUG]   diarization_threshold: {params.get('diarization_threshold')}")
+                print(f"[DEBUG]   tag_audio_events: {params.get('tag_audio_events')}")
+                print(f"[DEBUG]   additional_formats: {params.get('additional_formats')}")
+
                 response = client.speech_to_text.convert(**params)
 
             print(f"[+] Transcription complete!")
             print()
+
+            # Debug: Check response attributes
+            print(f"[DEBUG] Response attributes: {dir(response)}")
+            if hasattr(response, 'model_id'):
+                print(f"[DEBUG] Model used: {response.model_id}")
+            if hasattr(response, 'diarization_enabled'):
+                print(f"[DEBUG] Diarization enabled: {response.diarization_enabled}")
 
             # Extract transcript data from response with speaker diarization
             plain_text = ""
@@ -482,16 +500,28 @@ class AudioTranscriber:
                 print(f"[*] Processing transcription with speaker diarization and audio events...")
 
                 # additional_formats is a list of AdditionalFormatResponseModel objects
-                # Find the SRT format in the list
-                srt_format = None
+                # Find segmented_json (includes speaker labels AND timestamps)
+                json_format = None
                 for fmt in response.additional_formats:
-                    if hasattr(fmt, 'requested_format') and fmt.requested_format == 'srt':
-                        srt_format = fmt
+                    print(f"[DEBUG] Format: {fmt.requested_format}")
+                    if hasattr(fmt, 'requested_format') and fmt.requested_format == 'segmented_json':
+                        json_format = fmt
                         break
 
-                # Parse SRT format for speaker labels, audio events, and timestamps
-                if srt_format and hasattr(srt_format, 'content') and srt_format.content:
-                    srt_content = srt_format.content
+                if json_format and hasattr(json_format, 'content'):
+                    import json as json_lib
+                    try:
+                        test_json = json_lib.loads(json_format.content)
+                        print(f"[DEBUG] JSON keys: {test_json.keys() if isinstance(test_json, dict) else 'Not a dict'}")
+                        if 'segments' in test_json and len(test_json['segments']) > 0:
+                            print(f"[DEBUG] First segment: {test_json['segments'][0]}")
+                    except:
+                        print(f"[DEBUG] First 500 chars of JSON:\n{json_format.content[:500]}")
+
+                # Parse segmented_json for speaker labels, audio events, and timestamps
+                if json_format and hasattr(json_format, 'content') and json_format.content:
+                    import json as json_lib
+                    json_data = json_lib.loads(json_format.content)
 
                     # Parse SRT format (token-efficient AND preserves timestamps for YouTube bookmarks)
                     # SRT format: subtitle blocks with timestamps and speaker labels
