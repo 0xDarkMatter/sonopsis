@@ -456,6 +456,7 @@ class AudioTranscriber:
                     "model_id": "scribe_v2",  # Use latest V2 model
                     "file": audio_file,
                     "diarize": True,  # Enable speaker diarization
+                    "num_speakers": 5,  # Hint: expect up to 5 speakers (helps with diarization accuracy)
                     "tag_audio_events": True,  # Enable laughter, applause, etc.
                     "additional_formats": [{"format": "srt"}]  # Request SRT format (much more token-efficient than JSON)
                 }
