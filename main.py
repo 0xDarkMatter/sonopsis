@@ -108,7 +108,17 @@ def process_single_video(url: str, whisper_model: str = "base", gpt_model: str =
             'uploader': video_data['uploader'],
             'duration': video_data['duration'],
             'url': video_data['url'],
-            'whisper_model': whisper_model
+            'upload_date': video_data.get('upload_date', 'Unknown'),
+            'view_count': video_data.get('view_count', 0),
+            'like_count': video_data.get('like_count', 0),
+            'channel_url': video_data.get('channel_url', ''),
+            'tags': video_data.get('tags', []),
+            'categories': video_data.get('categories', []),
+            'description': video_data.get('description', ''),
+            'chapters': video_data.get('chapters', []),
+            'language': video_data.get('language', ''),
+            'whisper_model': whisper_model,
+            'analysis_mode': analysis_mode
         }
 
         summary_data = summarizer.summarize(

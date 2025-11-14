@@ -149,8 +149,16 @@ class ContentSummarizer:
             # Generate formatted output
             formatted_output = self._format_output(summary_content, video_metadata)
 
+            # Extract video ID and create filename with YT_{ID}_ prefix
+            video_id = self._extract_video_id(video_metadata.get('url', ''))
+            if video_id:
+                filename = f"YT_{video_id}_{self._sanitize_filename(video_metadata['title'])}_summary.md"
+            else:
+                # Fallback to old naming if ID extraction fails
+                filename = f"{self._sanitize_filename(video_metadata['title'])}_summary.md"
+
             # Save to file
-            output_file = self.output_dir / f"{self._sanitize_filename(video_metadata['title'])}_summary.md"
+            output_file = self.output_dir / filename
             with open(output_file, 'w', encoding='utf-8') as f:
                 f.write(formatted_output)
 
@@ -237,21 +245,93 @@ class ContentSummarizer:
         else:
             summary_display = f"OpenAI {self.model}"
 
-        header = f"""# Video Summary: {metadata.get('title', 'Unknown')}
+        # Format analysis mode
+        analysis_mode = metadata.get('analysis_mode', 'advanced')
+        mode_display = "Advanced (Narrative)" if analysis_mode == "advanced" else "Basic (Structured)"
 
----
+        # Format upload date (YYYYMMDD -> YYYY-MM-DD)
+        upload_date = metadata.get('upload_date', 'Unknown')
+        if upload_date != 'Unknown' and len(upload_date) == 8:
+            upload_date = f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:]}"
 
-**Channel:** {metadata.get('uploader', 'Unknown')}
-**Duration:** {self._format_duration(metadata.get('duration', 0))}
-**URL:** {metadata.get('url', 'N/A')}
-**Transcription Model:** {transcription_display}
-**Summarization Model:** {summary_display}
-**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+        # Build sectioned header
+        header_parts = [f"# Video Summary: {metadata.get('title', 'Unknown')}", ""]
+        header_parts.append("---")
+        header_parts.append("")
 
----
+        # Section 1: Video Information
+        header_parts.append("### Video Information")
+        header_parts.append(f"**Channel:** {metadata.get('uploader', 'Unknown')}")
 
-"""
-        return header + summary
+        channel_url = metadata.get('channel_url', '')
+        if channel_url:
+            header_parts.append(f"**Channel URL:** {channel_url}")
+
+        header_parts.append(f"**Published:** {upload_date}")
+        header_parts.append(f"**Duration:** {self._format_duration(metadata.get('duration', 0))}")
+
+        language = metadata.get('language', '')
+        if language:
+            header_parts.append(f"**Language:** {language}")
+
+        header_parts.append(f"**URL:** {metadata.get('url', 'N/A')}")
+        header_parts.append("")
+
+        # Section 2: Engagement Metrics
+        view_count = metadata.get('view_count', 0)
+        like_count = metadata.get('like_count', 0)
+        if view_count > 0 or like_count > 0:
+            header_parts.append("### Engagement Metrics")
+            if view_count > 0:
+                header_parts.append(f"**Views:** {self._format_number(view_count)}")
+            if like_count > 0:
+                header_parts.append(f"**Likes:** {self._format_number(like_count)}")
+            header_parts.append("")
+
+        # Section 3: Content Details
+        tags = metadata.get('tags', [])
+        categories = metadata.get('categories', [])
+        description = metadata.get('description', '')
+        chapters = metadata.get('chapters', [])
+
+        if tags or categories or description or chapters:
+            header_parts.append("### Content Details")
+
+            if tags:
+                tags_str = ', '.join(tags[:20])  # Limit to first 20 tags
+                if len(tags) > 20:
+                    tags_str += f" (+{len(tags) - 20} more)"
+                header_parts.append(f"**Tags:** {tags_str}")
+
+            if categories:
+                header_parts.append(f"**Categories:** {', '.join(categories)}")
+
+            if description:
+                # Use full description
+                header_parts.append(f"**Description:**")
+                header_parts.append(f"{description}")
+                header_parts.append("")
+
+            if chapters:
+                header_parts.append(f"**Chapters:** {len(chapters)} detected")
+                for i, chapter in enumerate(chapters, 1):
+                    start_time = self._format_timestamp_from_seconds(chapter.get('start_time', 0))
+                    title = chapter.get('title', f'Chapter {i}')
+                    header_parts.append(f"  - `{start_time}` {title}")
+
+            header_parts.append("")
+
+        # Section 4: Processing Information
+        header_parts.append("### Processing Information")
+        header_parts.append(f"**Transcription Model:** {transcription_display}")
+        header_parts.append(f"**Summarization Model:** {summary_display}")
+        header_parts.append(f"**Summary Mode:** {mode_display}")
+        header_parts.append(f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        header_parts.append("")
+        header_parts.append("---")
+        header_parts.append("")
+
+        return "\n".join(header_parts) + summary
 
     @staticmethod
     def _get_transcription_display_name(engine: str, whisper_model: str = "base") -> str:
@@ -276,6 +356,19 @@ class ContentSummarizer:
             return f"{minutes}m {secs}s"
         else:
             return f"{secs}s"
+
+    @staticmethod
+    def _format_timestamp_from_seconds(seconds: float) -> str:
+        """Format seconds to HH:MM:SS timestamp."""
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = int(seconds % 60)
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+    @staticmethod
+    def _format_number(num: int) -> str:
+        """Format large numbers with commas (e.g., 1234567 -> 1,234,567)."""
+        return f"{num:,}"
 
     @staticmethod
     def _extract_video_id(url: str) -> str:
