@@ -47,6 +47,7 @@ def print_info(message: str):
 
 def process_single_video(url: str, whisper_model: str = "base", gpt_model: str = "gpt-4o-mini",
                          analysis_mode: str = "basic", keep_files: bool = False,
+                         transcription_engine: str = "whisper",
                          video_num: int = None, total_videos: int = None):
     """
     Process a single YouTube video: download, transcribe, and summarize.
@@ -57,6 +58,7 @@ def process_single_video(url: str, whisper_model: str = "base", gpt_model: str =
         gpt_model: GPT model for summarization
         analysis_mode: Analysis mode (basic or advanced)
         keep_files: Whether to keep downloaded audio files
+        transcription_engine: Transcription engine (whisper, whisperx, or elevenlabs)
         video_num: Current video number (for batch processing)
         total_videos: Total number of videos (for batch processing)
 
@@ -76,8 +78,23 @@ def process_single_video(url: str, whisper_model: str = "base", gpt_model: str =
         print_success(f"Downloaded: {video_data['title']}")
 
         # Step 2: Transcribe audio
-        print_info("\nStep 2/3: Transcribing audio...")
-        transcriber = AudioTranscriber(model_name=whisper_model, output_dir="transcripts")
+        engine_names = {
+            "whisper": "Whisper",
+            "whisperx": "WhisperX",
+            "elevenlabs": "ElevenLabs"
+        }
+        engine_display = engine_names.get(transcription_engine, "Whisper")
+        model_info = f" ({whisper_model})" if transcription_engine != "elevenlabs" else ""
+
+        print_info(f"\nStep 2/3: Transcribing audio with {engine_display}{model_info}...")
+        transcriber = AudioTranscriber(
+            model_name=whisper_model,
+            output_dir="transcripts",
+            use_whisperx=(transcription_engine == "whisperx"),
+            hf_token=os.getenv("HF_TOKEN"),
+            use_elevenlabs=(transcription_engine == "elevenlabs"),
+            elevenlabs_api_key=os.getenv("ELEVENLABS_API_KEY")
+        )
         transcript_data = transcriber.transcribe(video_data['audio_file'])
         print_success(f"Transcription complete ({transcript_data['language']})")
 
@@ -133,7 +150,8 @@ def process_single_video(url: str, whisper_model: str = "base", gpt_model: str =
 
 
 def process_playlist(url: str, whisper_model: str = "base", gpt_model: str = "gpt-4o-mini",
-                     analysis_mode: str = "basic", keep_files: bool = False, start_from: int = 1):
+                     analysis_mode: str = "basic", keep_files: bool = False,
+                     transcription_engine: str = "whisper", start_from: int = 1):
     """
     Process all videos in a YouTube playlist.
 
@@ -143,6 +161,7 @@ def process_playlist(url: str, whisper_model: str = "base", gpt_model: str = "gp
         gpt_model: GPT model for summarization
         analysis_mode: Analysis mode (basic or advanced)
         keep_files: Whether to keep downloaded audio files
+        transcription_engine: Transcription engine (whisper, whisperx, or elevenlabs)
         start_from: Video number to start from (1-indexed)
     """
     print_header()
@@ -156,13 +175,21 @@ def process_playlist(url: str, whisper_model: str = "base", gpt_model: str = "gp
             print_error("No videos found in playlist")
             sys.exit(1)
 
+        engine_names = {
+            "whisper": "Whisper",
+            "whisperx": "WhisperX",
+            "elevenlabs": "ElevenLabs"
+        }
+        engine_display = engine_names.get(transcription_engine, "Whisper")
+        model_info = f" ({whisper_model})" if transcription_engine != "elevenlabs" else ""
+
         print(f"\n{Fore.CYAN}{'='*60}")
         print(f"{Fore.CYAN}Playlist Processing Summary")
         print(f"{Fore.CYAN}{'='*60}{Style.RESET_ALL}\n")
         print_info(f"Total videos: {len(videos)}")
         if start_from > 1:
             print_info(f"Starting from video: {start_from}")
-        print_info(f"Whisper model: {whisper_model}")
+        print_info(f"Transcription: {engine_display}{model_info}")
         print_info(f"AI model: {gpt_model}\n")
 
         # Process each video
@@ -185,6 +212,7 @@ def process_playlist(url: str, whisper_model: str = "base", gpt_model: str = "gp
                 gpt_model,
                 analysis_mode,
                 keep_files,
+                transcription_engine,
                 video_num=idx,
                 total_videos=len(videos)
             )
@@ -260,10 +288,17 @@ Examples:
     )
 
     parser.add_argument(
+        "--transcription-engine",
+        default="whisper",
+        choices=["whisper", "whisperx", "elevenlabs"],
+        help="Transcription engine: whisper (local, free), whisperx (local with speaker diarization), elevenlabs (cloud, paid) (default: whisper)"
+    )
+
+    parser.add_argument(
         "--whisper-model",
         default=os.getenv("WHISPER_MODEL", "base"),
         choices=["tiny", "base", "small", "medium", "large"],
-        help="Whisper model size (default: base)"
+        help="Whisper model size for local transcription (default: base, not used for elevenlabs)"
     )
 
     parser.add_argument(
@@ -306,6 +341,7 @@ Examples:
             gpt_model=args.gpt_model,
             analysis_mode=args.analysis_mode,
             keep_files=args.keep_files,
+            transcription_engine=args.transcription_engine,
             start_from=args.start_from
         )
     else:
@@ -316,7 +352,8 @@ Examples:
             whisper_model=args.whisper_model,
             gpt_model=args.gpt_model,
             analysis_mode=args.analysis_mode,
-            keep_files=args.keep_files
+            keep_files=args.keep_files,
+            transcription_engine=args.transcription_engine
         )
 
         if not result['success']:
