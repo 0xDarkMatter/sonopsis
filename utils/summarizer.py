@@ -92,9 +92,11 @@ class ContentSummarizer:
         try:
             # Call appropriate API based on model type
             if self.api_type == 'anthropic':
+                # Claude requires max_tokens parameter - use model maximum
+                # Sonnet 4.5 supports up to 64K output tokens
                 response = self.client.messages.create(
                     model=self.model,
-                    max_tokens=4000,
+                    max_tokens=64000,  # Claude Sonnet 4.5 maximum output capacity
                     temperature=0.7,
                     system=system_prompt,
                     messages=[
@@ -107,7 +109,6 @@ class ContentSummarizer:
                 summary_content = response.content[0].text
             else:
                 # OpenAI API (also used by OpenRouter with compatible interface)
-                # GPT-5.x uses max_completion_tokens instead of max_tokens
                 completion_params = {
                     "model": self.model,
                     "messages": [
@@ -123,13 +124,15 @@ class ContentSummarizer:
                     "temperature": 0.7
                 }
 
-                # GPT-5.x and reasoning models have different parameter requirements
-                if self.model.startswith('gpt-5') or self.model.startswith('o1') or self.model.startswith('o3'):
-                    # GPT-5.x requires max_completion_tokens and temperature=1 (default only)
-                    completion_params["max_completion_tokens"] = 4000
-                    completion_params["temperature"] = 1  # GPT-5.x only supports default temperature
-                else:
-                    completion_params["max_tokens"] = 2000
+                # For OpenAI models, max_tokens is optional
+                # If omitted, model uses its full output capacity
+                # Only set for reasoning models that require it
+                if self.model.startswith('o1') or self.model.startswith('o3'):
+                    # Reasoning models require max_completion_tokens and temperature=1
+                    completion_params["max_completion_tokens"] = 32768  # o1 supports up to 100k
+                    completion_params["temperature"] = 1
+                # For GPT-4o, GPT-5, and OpenRouter models: don't limit output tokens
+                # Let the model use its full capacity
 
                 response = self.client.chat.completions.create(**completion_params)
                 summary_content = response.choices[0].message.content
