@@ -69,7 +69,7 @@ class ContentSummarizer:
             self.client = OpenAI(api_key=self.api_key)
 
     def summarize(self, transcript: str, video_metadata: Dict[str, any],
-                  analysis_mode: str = "advanced") -> Dict[str, str]:
+                  analysis_mode: str = "advanced", transcription_engine: str = "whisper") -> Dict[str, str]:
         """
         Generate a comprehensive summary and notes from a transcript.
 
@@ -77,11 +77,15 @@ class ContentSummarizer:
             transcript: Video transcript text
             video_metadata: Dictionary containing video information
             analysis_mode: "basic" or "advanced" (default: "advanced")
+            transcription_engine: Engine used for transcription (whisper, whisperx, elevenlabs)
 
         Returns:
             Dictionary containing summary, key points, and notes
         """
         print(f"[*] Generating summary using {self.model} ({analysis_mode} mode)")
+
+        # Store transcription engine for metadata
+        self.transcription_engine = transcription_engine
 
         # Load system prompt from external file
         system_prompt = self._load_system_prompt()
@@ -219,6 +223,20 @@ class ContentSummarizer:
 
     def _format_output(self, summary: str, metadata: Dict[str, any]) -> str:
         """Format the final output with metadata header."""
+        # Format transcription model display name
+        transcription_display = self._get_transcription_display_name(
+            self.transcription_engine,
+            metadata.get('whisper_model', 'base')
+        )
+
+        # Format summarization model display name
+        if self.api_type == 'anthropic':
+            summary_display = f"Anthropic {self.model}"
+        elif self.api_type == 'openrouter':
+            summary_display = f"OpenRouter: {self.model}"
+        else:
+            summary_display = f"OpenAI {self.model}"
+
         header = f"""# Video Summary: {metadata.get('title', 'Unknown')}
 
 ---
@@ -226,12 +244,24 @@ class ContentSummarizer:
 **Channel:** {metadata.get('uploader', 'Unknown')}
 **Duration:** {self._format_duration(metadata.get('duration', 0))}
 **URL:** {metadata.get('url', 'N/A')}
+**Transcription Model:** {transcription_display}
+**Summarization Model:** {summary_display}
 **Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
 ---
 
 """
         return header + summary
+
+    @staticmethod
+    def _get_transcription_display_name(engine: str, whisper_model: str = "base") -> str:
+        """Get display name for transcription engine."""
+        engine_names = {
+            "whisper": f"Whisper ({whisper_model})",
+            "whisperx": "WhisperX (with speaker diarization)",
+            "elevenlabs": "ElevenLabs Scribe V2"
+        }
+        return engine_names.get(engine, engine)
 
     @staticmethod
     def _format_duration(seconds: int) -> str:
