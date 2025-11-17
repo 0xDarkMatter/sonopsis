@@ -264,7 +264,7 @@ class ContentSummarizer:
         Call Gemini CLI in YOLO mode (non-interactive).
 
         Uses the gemini CLI tool with YOLO mode (-y) to auto-approve any tool usage.
-        Command format: gemini -m MODEL -o text -y "PROMPT"
+        Writes prompt to stdin using subprocess.PIPE
 
         Args:
             system_prompt: System instructions
@@ -274,40 +274,41 @@ class ContentSummarizer:
             Generated summary text
         """
         import subprocess
-        import tempfile
 
         # Combine prompts
         full_prompt = f"{system_prompt}\n\n{user_prompt}"
 
-        # Write to temp file for large prompts
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
-            f.write(full_prompt)
-            prompt_file = f.name
-
         try:
-            # Use YOLO mode (-y) and text output (-o text)
-            # Read prompt from file via stdin
-            with open(prompt_file, 'r', encoding='utf-8') as f:
-                result = subprocess.run(
-                    ['gemini', '-m', self.model, '-o', 'text', '-y'],
-                    stdin=f,
-                    capture_output=True,
-                    text=True,
-                    timeout=600  # 10 minute timeout for long summaries
-                )
+            # Use Popen to write to stdin directly
+            process = subprocess.Popen(
+                ['gemini', '-m', self.model, '-o', 'text', '-y'],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
 
-            if result.returncode != 0:
-                raise Exception(f"Gemini CLI error: {result.stderr}")
+            # Write the prompt to stdin and close it
+            stdout, stderr = process.communicate(input=full_prompt, timeout=600)
 
-            return result.stdout.strip()
+            if process.returncode != 0:
+                raise Exception(f"Gemini CLI error: {stderr}")
 
-        finally:
-            # Clean up temp file
-            import os as os_module
-            try:
-                os_module.unlink(prompt_file)
-            except:
-                pass
+            # Clean up the output - remove YOLO mode message and cached credentials message
+            lines = stdout.strip().split('\n')
+
+            # Skip common Gemini CLI status messages
+            cleaned_lines = []
+            for line in lines:
+                if 'YOLO mode is enabled' in line or 'Loaded cached credentials' in line:
+                    continue
+                cleaned_lines.append(line)
+
+            return '\n'.join(cleaned_lines).strip()
+
+        except subprocess.TimeoutExpired:
+            process.kill()
+            raise Exception("Gemini CLI timed out after 10 minutes")
 
     def summarize(self, transcript: str, video_metadata: Dict[str, any],
                   analysis_mode: str = "advanced", transcription_engine: str = "whisper") -> Dict[str, str]:
