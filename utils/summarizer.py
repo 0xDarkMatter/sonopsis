@@ -71,20 +71,6 @@ class ContentSummarizer:
             if not self.api_key:
                 raise ValueError("Anthropic API key not found. Set ANTHROPIC_API_KEY environment variable.")
             self.client = Anthropic(api_key=self.api_key)
-        elif model.startswith('gemini-2.5'):
-            # Gemini CLI (local)
-            self.api_type = 'gemini-cli'
-            self.client = None  # Uses CLI commands
-            # Check if Gemini CLI is installed
-            import subprocess
-            try:
-                result = subprocess.run(['gemini', '--version'], capture_output=True, text=True, timeout=5)
-                if result.returncode != 0:
-                    raise ValueError("Gemini CLI not found. Install it first: https://ai.google.dev/gemini-api/docs/cli")
-            except FileNotFoundError:
-                raise ValueError("Gemini CLI not installed. Install it first: https://ai.google.dev/gemini-api/docs/cli")
-            except subprocess.TimeoutExpired:
-                raise ValueError("Gemini CLI is not responding")
         elif model.startswith('openrouter/'):
             # OpenRouter uses OpenAI-compatible API
             self.api_type = 'openrouter'
@@ -137,10 +123,6 @@ class ContentSummarizer:
             'gpt-5.1': 128000,
             'o1': 200000,
             'o3': 200000,
-
-            # Gemini (direct CLI)
-            'gemini-2.5-pro': 2000000,  # 2M context window
-            'gemini-2.5-flash': 1000000,  # 1M context window
 
             # Gemini via OpenRouter
             'gemini-1.5-pro': 2000000,
@@ -237,92 +219,6 @@ class ContentSummarizer:
             chunks.append((chunk_text, chunk_start_line, len(lines) - 1))
 
         return chunks
-
-    def _call_gemini_cli(self, system_prompt: str, user_prompt: str) -> str:
-        """
-        Call Gemini CLI and stream the response.
-
-        Args:
-            system_prompt: System prompt/instructions
-            user_prompt: User prompt with transcript
-
-        Returns:
-            Generated summary text
-        """
-        import subprocess
-        import json
-        import tempfile
-
-        # Combine system and user prompts
-        full_prompt = f"{system_prompt}\n\n{user_prompt}"
-
-        # Write prompt to temporary file to avoid command-line length limits
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
-            f.write(full_prompt)
-            prompt_file = f.name
-
-        try:
-            # Prepare the Gemini CLI command
-            # Using stream-json output format for streaming
-            cmd = [
-                'gemini',
-                '-m', self.model,
-                '-o', 'stream-json'
-            ]
-
-            # Start the process, feeding the prompt via stdin
-            with open(prompt_file, 'r', encoding='utf-8') as prompt_input:
-                process = subprocess.Popen(
-                    cmd,
-                    stdin=prompt_input,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    bufsize=1
-                )
-
-                # Read streaming JSON output
-                summary_content = ""
-                for line in process.stdout:
-                    line = line.strip()
-                    if not line:
-                        continue
-
-                    try:
-                        # Parse JSON line
-                        data = json.loads(line)
-                        # Extract text content from the JSON response
-                        if 'content' in data:
-                            summary_content += data['content']
-                            self._char_count = len(summary_content)
-                        elif 'text' in data:
-                            summary_content += data['text']
-                            self._char_count = len(summary_content)
-                        elif 'message' in data:
-                            summary_content += data['message']
-                            self._char_count = len(summary_content)
-                    except json.JSONDecodeError:
-                        # If not JSON, treat as plain text
-                        summary_content += line + "\n"
-                        self._char_count = len(summary_content)
-
-                # Wait for completion
-                process.wait()
-
-                if process.returncode != 0:
-                    error_output = process.stderr.read()
-                    raise Exception(f"Gemini CLI error (exit code {process.returncode}): {error_output}")
-
-                return summary_content.strip()
-
-        except Exception as e:
-            raise Exception(f"Gemini CLI failed: {str(e)}")
-        finally:
-            # Clean up temp file
-            try:
-                os.unlink(prompt_file)
-            except:
-                pass
 
     def _show_streaming_progress(self):
         """Show streaming progress indicator with character count."""
@@ -434,9 +330,6 @@ class ContentSummarizer:
                     for text in stream.text_stream:
                         summary_content += text
                         self._char_count = len(summary_content)
-            elif self.api_type == 'gemini-cli':
-                # Gemini CLI integration
-                summary_content = self._call_gemini_cli(system_prompt, prompt)
             else:
                 # OpenAI API (also used by OpenRouter with compatible interface)
                 completion_params = {
@@ -560,8 +453,6 @@ class ContentSummarizer:
                         for text in stream.text_stream:
                             chunk_summary += text
                             self._char_count = len(chunk_summary)
-                elif self.api_type == 'gemini-cli':
-                    chunk_summary = self._call_gemini_cli(system_prompt, chunk_prompt)
                 else:
                     stream = self.client.chat.completions.create(
                         model=self.model,
@@ -611,8 +502,6 @@ class ContentSummarizer:
                     for text in stream.text_stream:
                         summary_content += text
                         self._char_count = len(summary_content)
-            elif self.api_type == 'gemini-cli':
-                summary_content = self._call_gemini_cli(system_prompt, combined_prompt)
             else:
                 stream = self.client.chat.completions.create(
                     model=self.model,
