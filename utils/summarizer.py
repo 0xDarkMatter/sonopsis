@@ -251,54 +251,78 @@ class ContentSummarizer:
         """
         import subprocess
         import json
+        import tempfile
 
         # Combine system and user prompts
         full_prompt = f"{system_prompt}\n\n{user_prompt}"
 
-        # Prepare the Gemini CLI command
-        # Using streaming output with the gemini CLI
-        cmd = [
-            'gemini',
-            'chat',
-            '--model', self.model,
-            '--temperature', '0.7',
-            '--stream'
-        ]
+        # Write prompt to temporary file to avoid command-line length limits
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
+            f.write(full_prompt)
+            prompt_file = f.name
 
         try:
-            # Start the process
-            process = subprocess.Popen(
-                cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1
-            )
+            # Prepare the Gemini CLI command
+            # Using stream-json output format for streaming
+            cmd = [
+                'gemini',
+                '-m', self.model,
+                '-o', 'stream-json'
+            ]
 
-            # Send the prompt
-            process.stdin.write(full_prompt)
-            process.stdin.close()
+            # Start the process, feeding the prompt via stdin
+            with open(prompt_file, 'r', encoding='utf-8') as prompt_input:
+                process = subprocess.Popen(
+                    cmd,
+                    stdin=prompt_input,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1
+                )
 
-            # Read streaming output
-            summary_content = ""
-            for line in process.stdout:
-                line = line.strip()
-                if line:
-                    summary_content += line + "\n"
-                    self._char_count = len(summary_content)
+                # Read streaming JSON output
+                summary_content = ""
+                for line in process.stdout:
+                    line = line.strip()
+                    if not line:
+                        continue
 
-            # Wait for completion
-            process.wait()
+                    try:
+                        # Parse JSON line
+                        data = json.loads(line)
+                        # Extract text content from the JSON response
+                        if 'content' in data:
+                            summary_content += data['content']
+                            self._char_count = len(summary_content)
+                        elif 'text' in data:
+                            summary_content += data['text']
+                            self._char_count = len(summary_content)
+                        elif 'message' in data:
+                            summary_content += data['message']
+                            self._char_count = len(summary_content)
+                    except json.JSONDecodeError:
+                        # If not JSON, treat as plain text
+                        summary_content += line + "\n"
+                        self._char_count = len(summary_content)
 
-            if process.returncode != 0:
-                error_output = process.stderr.read()
-                raise Exception(f"Gemini CLI error: {error_output}")
+                # Wait for completion
+                process.wait()
 
-            return summary_content.strip()
+                if process.returncode != 0:
+                    error_output = process.stderr.read()
+                    raise Exception(f"Gemini CLI error (exit code {process.returncode}): {error_output}")
+
+                return summary_content.strip()
 
         except Exception as e:
             raise Exception(f"Gemini CLI failed: {str(e)}")
+        finally:
+            # Clean up temp file
+            try:
+                os.unlink(prompt_file)
+            except:
+                pass
 
     def _show_streaming_progress(self):
         """Show streaming progress indicator with character count."""
@@ -913,11 +937,43 @@ Now create the comprehensive final summary following the standard format for {an
         return engine_names.get(engine, engine)
 
     @staticmethod
-    def _format_duration(seconds: int) -> str:
-        """Format duration in seconds to HH:MM:SS."""
-        hours = seconds // 3600
-        minutes = (seconds % 3600) // 60
-        secs = seconds % 60
+    def _format_duration(duration) -> str:
+        """
+        Format duration to readable string.
+
+        Args:
+            duration: Either integer (seconds) or string (HH:MM:SS format)
+
+        Returns:
+            Formatted duration string
+        """
+        # Handle string format (HH:MM:SS)
+        if isinstance(duration, str):
+            # If already in readable format, return as is
+            if 'h' in duration or 'm' in duration:
+                return duration
+            # Parse HH:MM:SS format
+            parts = duration.split(':')
+            if len(parts) == 3:
+                hours, minutes, secs = map(int, parts)
+                if hours > 0:
+                    return f"{hours}h {minutes}m {secs}s"
+                elif minutes > 0:
+                    return f"{minutes}m {secs}s"
+                else:
+                    return f"{secs}s"
+            return duration
+
+        # Handle integer format (seconds)
+        if not isinstance(duration, int):
+            try:
+                duration = int(duration)
+            except (ValueError, TypeError):
+                return str(duration)
+
+        hours = duration // 3600
+        minutes = (duration % 3600) // 60
+        secs = duration % 60
 
         if hours > 0:
             return f"{hours}h {minutes}m {secs}s"
