@@ -5,9 +5,16 @@ User-friendly interface with model selection menus.
 
 import os
 import sys
+import warnings
 from pathlib import Path
 from dotenv import load_dotenv
 from colorama import init, Fore, Style
+
+# Suppress warnings on macOS
+warnings.filterwarnings('ignore', message='urllib3 v2 only supports OpenSSL 1.1.1+')
+warnings.filterwarnings('ignore', category=DeprecationWarning, module='urllib3')
+warnings.filterwarnings('ignore', message='Support for Python version 3.9 has been deprecated')
+warnings.filterwarnings('ignore', category=DeprecationWarning, module='yt_dlp')
 
 # Set UTF-8 encoding for Windows console
 if sys.platform == 'win32':
@@ -27,6 +34,39 @@ init(autoreset=True)
 
 # Load environment variables
 load_dotenv()
+
+
+def getch():
+    """Cross-platform single character input without echo."""
+    if sys.platform == 'win32':
+        import msvcrt
+        return msvcrt.getch()
+    else:
+        import termios
+        import tty
+
+        # Check if stdin is connected to a terminal
+        if not sys.stdin.isatty():
+            print(f"\n{Fore.RED}Error: This program requires an interactive terminal.{Style.RESET_ALL}")
+            print(f"{Fore.YELLOW}Please run it in a terminal, not in background mode.{Style.RESET_ALL}\n")
+            sys.exit(1)
+
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            ch = sys.stdin.read(1)
+            # Handle escape sequences (arrow keys, etc.)
+            if ch == '\x1b':  # ESC
+                # Read next two characters for arrow keys
+                ch2 = sys.stdin.read(1)
+                if ch2 == '[':
+                    ch3 = sys.stdin.read(1)
+                    return '\x1b[' + ch3
+                return ch + ch2
+            return ch
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
 
 def print_banner():
@@ -91,8 +131,6 @@ def print_section_header(title):
 
 def show_menu(title, menu_items, default_selected=0):
     """Generic menu with keyboard navigation."""
-    import msvcrt
-
     width = 100
     selected = default_selected
 
@@ -149,27 +187,49 @@ def show_menu(title, menu_items, default_selected=0):
     print(f"{Style.BRIGHT}{Fore.CYAN}Use ↑/↓ arrows or TAB to navigate, ENTER to select{Style.RESET_ALL}", end='', flush=True)
 
     while True:
-        key = msvcrt.getch()
+        key = getch()
 
-        if key == b'\xe0':  # Arrow key prefix
-            key = msvcrt.getch()
-            if key == b'H':  # Up arrow
-                selected = (selected - 1) % len(menu_items)
-                render_menu()
-            elif key == b'P':  # Down arrow
+        # Handle different key formats for Windows vs Unix/macOS
+        if sys.platform == 'win32':
+            # Windows: msvcrt returns bytes
+            if key == b'\xe0':  # Arrow key prefix
+                key = getch()
+                if key == b'H':  # Up arrow
+                    selected = (selected - 1) % len(menu_items)
+                    render_menu()
+                elif key == b'P':  # Down arrow
+                    selected = (selected + 1) % len(menu_items)
+                    render_menu()
+            elif key == b'\t':  # Tab
                 selected = (selected + 1) % len(menu_items)
                 render_menu()
-        elif key == b'\t':  # Tab
-            selected = (selected + 1) % len(menu_items)
-            render_menu()
-        elif key == b'\r':  # Enter
-            print()  # New line after selection
-            return selected
-        elif key.isdigit():  # Direct number selection
-            num = int(key.decode()) - 1
-            if 0 <= num < len(menu_items):
-                print()
-                return num
+            elif key == b'\r':  # Enter
+                print()  # New line after selection
+                return selected
+            elif key.isdigit():  # Direct number selection
+                num = int(key.decode()) - 1
+                if 0 <= num < len(menu_items):
+                    print()
+                    return num
+        else:
+            # Unix/macOS: returns strings
+            if key == '\x1b[A':  # Up arrow
+                selected = (selected - 1) % len(menu_items)
+                render_menu()
+            elif key == '\x1b[B':  # Down arrow
+                selected = (selected + 1) % len(menu_items)
+                render_menu()
+            elif key == '\t':  # Tab
+                selected = (selected + 1) % len(menu_items)
+                render_menu()
+            elif key in ['\r', '\n']:  # Enter
+                print()  # New line after selection
+                return selected
+            elif key.isdigit():  # Direct number selection
+                num = int(key) - 1
+                if 0 <= num < len(menu_items):
+                    print()
+                    return num
 
 
 def show_main_menu():
@@ -327,8 +387,7 @@ def select_transcription_mode_menu():
             print(f"{Fore.CYAN}3. Add to .env file: ELEVENLABS_API_KEY=your_key_here{Style.RESET_ALL}\n")
             print(f"{Fore.YELLOW}Transcription will fail without a valid API key.{Style.RESET_ALL}")
             print(f"{Fore.YELLOW}Press any key to continue anyway...{Style.RESET_ALL}")
-            import msvcrt
-            msvcrt.getch()
+            getch()
 
     return engine  # Returns "whisper", "whisperx", or "elevenlabs"
 
@@ -553,11 +612,11 @@ def select_summary_model():
         print(f"    {Fore.WHITE}{models[str(model_num)]['desc']}{Style.RESET_ALL}\n")
         model_num += 1
 
-        # GPT-5
-        models[str(model_num)] = {'name': 'gpt-5', 'provider': 'OpenAI',
+        # GPT-5.1
+        models[str(model_num)] = {'name': 'gpt-5.1', 'provider': 'OpenAI',
                                    'cost': '$0.30', 'speed': 'Slow', 'quality': 'Excellent',
                                    'desc': 'PhD-level reasoning, catches transcript errors, most accurate'}
-        print(f"{Fore.GREEN}[{model_num}]{Style.RESET_ALL} {Fore.WHITE}{Style.BRIGHT}GPT-5{Style.RESET_ALL} "
+        print(f"{Fore.GREEN}[{model_num}]{Style.RESET_ALL} {Fore.WHITE}{Style.BRIGHT}GPT-5.1{Style.RESET_ALL} "
               f"{Fore.MAGENTA}[PHD-LEVEL]{Style.RESET_ALL}")
         print(f"    {Fore.CYAN}Speed:{Style.RESET_ALL} Slow       {Fore.CYAN}Cost:{Style.RESET_ALL} ~$0.30    {Fore.CYAN}Quality:{Style.RESET_ALL} Excellent")
         print(f"    {Fore.WHITE}{models[str(model_num)]['desc']}{Style.RESET_ALL}\n")
@@ -588,7 +647,31 @@ def select_summary_model():
         print(f"    {Fore.WHITE}{models[str(model_num)]['desc']}{Style.RESET_ALL}\n")
         model_num += 1
 
-    if not has_openai and not has_anthropic:
+    # Check for Gemini CLI
+    has_gemini = False
+    try:
+        import subprocess
+        result = subprocess.run(['gemini', '--version'], capture_output=True, text=True, timeout=2)
+        has_gemini = (result.returncode == 0)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+    if has_gemini:
+        print(f"{Fore.GREEN}{'='*70}{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}  GOOGLE GEMINI MODELS (Local CLI){Style.RESET_ALL}")
+        print(f"{Fore.GREEN}{'='*70}{Style.RESET_ALL}\n")
+
+        # Gemini 2.5 Pro
+        models[str(model_num)] = {'name': 'gemini-2.5-pro', 'provider': 'Google',
+                                   'cost': '$0.20', 'speed': 'Fast', 'quality': 'Excellent',
+                                   'desc': 'Massive 2M context! Can handle 100+ hour videos, best for very long content'}
+        print(f"{Fore.GREEN}[{model_num}]{Style.RESET_ALL} {Fore.WHITE}{Style.BRIGHT}GEMINI 2.5 PRO{Style.RESET_ALL} "
+              f"{Fore.MAGENTA}[2M CONTEXT]{Style.RESET_ALL}")
+        print(f"    {Fore.CYAN}Speed:{Style.RESET_ALL} Fast       {Fore.CYAN}Cost:{Style.RESET_ALL} ~$0.20    {Fore.CYAN}Quality:{Style.RESET_ALL} Excellent")
+        print(f"    {Fore.WHITE}{models[str(model_num)]['desc']}{Style.RESET_ALL}\n")
+        model_num += 1
+
+    if not has_openai and not has_anthropic and not has_gemini:
         print(f"{Fore.RED}[!] No API keys found in .env file!{Style.RESET_ALL}")
         print(f"{Fore.YELLOW}[*] Please add OPENAI_API_KEY or ANTHROPIC_API_KEY to your .env file{Style.RESET_ALL}")
         sys.exit(1)
@@ -629,10 +712,10 @@ def process_single_video(url, whisper_model, summary_model, analysis_mode, keep_
 
     try:
         # Step 1: Download
-        print(f"{Fore.CYAN}[1/3] Downloading {'video' if download_video else 'audio'}...{Style.RESET_ALL}")
+        print(f"\n{Fore.CYAN}┌─ [1/3] Downloading {'video' if download_video else 'audio'}...{Style.RESET_ALL}")
         downloader = YouTubeDownloader(output_dir="downloads")
         video_data = downloader.download_video(url, audio_only=not download_video)
-        print(f"{Fore.CYAN}[+] Download complete{Style.RESET_ALL}\n")
+        print(f"{Fore.CYAN}└─ Download complete{Style.RESET_ALL}\n")
 
         # Step 2: Transcribe
         # Map engine to display name
@@ -645,7 +728,7 @@ def process_single_video(url, whisper_model, summary_model, analysis_mode, keep_
 
         # Show model info for local engines, skip for ElevenLabs
         model_info = f" ({whisper_model} model)" if transcription_engine != "elevenlabs" else ""
-        print(f"{Fore.CYAN}[2/3] Transcribing audio with {transcription_type}{model_info}...{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}┌─ [2/3] Transcribing audio with {transcription_type}{model_info}...{Style.RESET_ALL}")
 
         transcriber = AudioTranscriber(
             model_name=whisper_model,
@@ -656,10 +739,10 @@ def process_single_video(url, whisper_model, summary_model, analysis_mode, keep_
             elevenlabs_api_key=os.getenv("ELEVENLABS_API_KEY")
         )
         transcript_data = transcriber.transcribe(video_data['audio_file'])
-        print(f"{Fore.CYAN}[+] Transcription complete ({transcript_data['language']}){Style.RESET_ALL}\n")
+        print(f"{Fore.CYAN}└─ Transcription complete ({transcript_data['language']}){Style.RESET_ALL}\n")
 
         # Step 3: Summarize
-        print(f"{Fore.CYAN}[3/3] Generating summary with {summary_model}...{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}┌─ [3/3] Generating summary...{Style.RESET_ALL}")
         summarizer = ContentSummarizer(model=summary_model, output_dir="summaries")
 
         metadata = {
@@ -686,27 +769,26 @@ def process_single_video(url, whisper_model, summary_model, analysis_mode, keep_
             analysis_mode,
             transcription_engine=transcription_engine
         )
-        print(f"{Fore.CYAN}[+] Summary complete{Style.RESET_ALL}\n")
 
         # Cleanup
         if not keep_files:
             audio_file = Path(video_data['audio_file'])
             if audio_file.exists():
                 audio_file.unlink()
-                print(f"{Fore.CYAN}[*] Cleaned up files{Style.RESET_ALL}\n")
 
         # Print results
-        print(f"\n{Fore.CYAN}{'='*70}")
-        print(f"{Fore.CYAN}Video Processing Complete!{Style.RESET_ALL}")
-        print(f"{Fore.CYAN}{'='*70}\n")
+        print(f"\n{Fore.GREEN}{'='*80}")
+        print(f"{Fore.GREEN}✓ Video Processing Complete!{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}{'='*80}{Style.RESET_ALL}\n")
 
         try:
-            print(f"{Fore.CYAN}Video:{Style.RESET_ALL} {video_data['title']}")
+            print(f"{Fore.CYAN}Video:      {Style.RESET_ALL}{video_data['title']}")
         except UnicodeEncodeError:
-            print(f"{Fore.CYAN}Video:{Style.RESET_ALL} [Title with special characters]")
+            print(f"{Fore.CYAN}Video:      {Style.RESET_ALL}[Title with special characters]")
 
-        print(f"{Fore.CYAN}Transcript:{Style.RESET_ALL} {transcript_data['text_file']}")
-        print(f"{Fore.CYAN}Summary:{Style.RESET_ALL} {summary_data['output_file']}\n")
+        print(f"{Fore.CYAN}URL:        {Style.RESET_ALL}{video_data['url']}")
+        print(f"{Fore.CYAN}Transcript: {Style.RESET_ALL}{transcript_data['text_file']}")
+        print(f"{Fore.CYAN}Summary:    {Style.RESET_ALL}{summary_data['output_file']}\n")
 
         return {
             'success': True,
