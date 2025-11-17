@@ -4,10 +4,16 @@ Generates well-formatted summaries and notes using OpenAI's GPT models or Anthro
 """
 
 import os
+import sys
+import time
+import threading
+import re
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Tuple
 from openai import OpenAI
 from datetime import datetime
+from colorama import Fore, Style
+import tiktoken
 
 # Try to import Anthropic, but make it optional
 try:
@@ -35,6 +41,26 @@ class ContentSummarizer:
         self.model = model
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self._stop_progress = False
+        self._char_count = 0
+
+        # Token counting setup
+        try:
+            # Try to get encoding for the specific model
+            if model.startswith('gpt'):
+                self.encoding = tiktoken.encoding_for_model(model)
+            elif model.startswith('claude'):
+                # Claude uses cl100k_base encoding (same as GPT-4)
+                self.encoding = tiktoken.get_encoding("cl100k_base")
+            else:
+                # Fallback to cl100k_base for other models
+                self.encoding = tiktoken.get_encoding("cl100k_base")
+        except Exception:
+            # Fallback encoding if model not recognized
+            self.encoding = tiktoken.get_encoding("cl100k_base")
+
+        # Determine model-specific token limits
+        self._set_model_token_limits(model)
 
         # Determine which API to use based on model name
         if model.startswith('claude'):
@@ -68,10 +94,159 @@ class ContentSummarizer:
                 raise ValueError("OpenAI API key not found. Set OPENAI_API_KEY environment variable.")
             self.client = OpenAI(api_key=self.api_key)
 
+    def _set_model_token_limits(self, model: str):
+        """
+        Set model-specific token limits for chunking strategy.
+
+        Different models have different context windows:
+        - Claude Sonnet 4.5: 200K input
+        - Claude Haiku 4.5: 200K input
+        - GPT-4o: 128K input
+        - GPT-4o-mini: 128K input
+        - GPT-5: 128K input
+        - Gemini 1.5/2.0: 1-2M input (via OpenRouter)
+
+        Args:
+            model: Model name
+        """
+        # Define model context windows (input tokens)
+        model_limits = {
+            # Claude models
+            'claude-sonnet-4-5': 200000,
+            'claude-haiku-4-5': 200000,
+            'claude-opus-4': 200000,
+            'claude-sonnet-4': 200000,
+
+            # OpenAI models
+            'gpt-4o': 128000,
+            'gpt-4o-mini': 128000,
+            'gpt-5': 128000,
+            'o1': 200000,
+            'o3': 200000,
+
+            # Gemini via OpenRouter
+            'gemini-1.5-pro': 2000000,
+            'gemini-1.5-flash': 1000000,
+            'gemini-2.0-flash': 1000000,
+            'google/gemini': 1000000,  # OpenRouter prefix
+
+            # Other OpenRouter models
+            'kimi-k2': 128000,
+            'glm-4': 128000,
+        }
+
+        # Find matching limit
+        context_window = 128000  # Default fallback
+        for model_key, limit in model_limits.items():
+            if model_key in model.lower():
+                context_window = limit
+                break
+
+        # Set conservative limits (75% of context window to leave room for output and overhead)
+        self.max_input_tokens = int(context_window * 0.75)
+
+        # Set chunk target based on context window
+        # For very large windows (>500K), use bigger chunks
+        if context_window >= 500000:
+            self.chunk_target_tokens = 100000  # Gemini can handle larger chunks
+        else:
+            self.chunk_target_tokens = 40000  # Standard chunk size
+
+        # Store for logging
+        self.context_window = context_window
+
+    def _count_tokens(self, text: str) -> int:
+        """
+        Count tokens in a text string.
+
+        Args:
+            text: Text to count tokens for
+
+        Returns:
+            Number of tokens
+        """
+        try:
+            return len(self.encoding.encode(text))
+        except Exception:
+            # Fallback: rough estimate (1 token ≈ 0.75 words)
+            return int(len(text.split()) * 1.3)
+
+    def _chunk_transcript(self, transcript: str, metadata: Dict) -> List[Tuple[str, int, int]]:
+        """
+        Intelligently chunk transcript by speaker segments and timestamps.
+
+        Args:
+            transcript: Full transcript text
+            metadata: Video metadata
+
+        Returns:
+            List of tuples: (chunk_text, start_line, end_line)
+        """
+        # Split transcript into segments (by speaker/timestamp)
+        lines = transcript.split('\n')
+
+        chunks = []
+        current_chunk = []
+        current_tokens = 0
+        chunk_start_line = 0
+
+        for i, line in enumerate(lines):
+            line = line.strip()
+            if not line:
+                continue
+
+            # Count tokens for this line
+            line_tokens = self._count_tokens(line)
+
+            # Check if adding this line would exceed target
+            if current_tokens + line_tokens > self.chunk_target_tokens and current_chunk:
+                # Save current chunk
+                chunk_text = '\n'.join(current_chunk)
+                chunks.append((chunk_text, chunk_start_line, i - 1))
+
+                # Start new chunk
+                current_chunk = [line]
+                current_tokens = line_tokens
+                chunk_start_line = i
+            else:
+                # Add to current chunk
+                current_chunk.append(line)
+                current_tokens += line_tokens
+
+        # Add final chunk
+        if current_chunk:
+            chunk_text = '\n'.join(current_chunk)
+            chunks.append((chunk_text, chunk_start_line, len(lines) - 1))
+
+        return chunks
+
+    def _show_streaming_progress(self):
+        """Show streaming progress indicator with character count."""
+        start_time = time.time()
+        print()  # Add space above
+
+        while not self._stop_progress:
+            elapsed = time.time() - start_time
+            elapsed_str = f"{int(elapsed // 60):02d}:{int(elapsed % 60):02d}"
+
+            # Create animated dots
+            dots = "." * ((int(elapsed * 2) % 3) + 1) + " " * (3 - ((int(elapsed * 2) % 3) + 1))
+
+            # Show progress with character count
+            progress_text = f"\r{Fore.CYAN}    ├─ Generating{dots} {elapsed_str} | {self._char_count:,} chars generated{Style.RESET_ALL}"
+            try:
+                sys.stdout.write(progress_text)
+                sys.stdout.flush()
+            except UnicodeEncodeError:
+                pass
+
+            time.sleep(0.5)
+
     def summarize(self, transcript: str, video_metadata: Dict[str, any],
                   analysis_mode: str = "advanced", transcription_engine: str = "whisper") -> Dict[str, str]:
         """
         Generate a comprehensive summary and notes from a transcript.
+        Automatically uses chunking for long transcripts.
 
         Args:
             transcript: Video transcript text
@@ -82,11 +257,44 @@ class ContentSummarizer:
         Returns:
             Dictionary containing summary, key points, and notes
         """
-        print(f"[*] Generating summary using {self.model} ({analysis_mode} mode)")
-
         # Store transcription engine for metadata
         self.transcription_engine = transcription_engine
 
+        # Count tokens in transcript + estimated overhead
+        transcript_tokens = self._count_tokens(transcript)
+        system_prompt = self._load_system_prompt()
+        system_tokens = self._count_tokens(system_prompt)
+        metadata_str = str(video_metadata)
+        metadata_tokens = self._count_tokens(metadata_str)
+
+        total_input_tokens = transcript_tokens + system_tokens + metadata_tokens + 1000  # +1000 for prompt template
+
+        print(f"    ├─ Using {self.model} ({analysis_mode} mode)")
+        print(f"    ├─ Model context window: {self.context_window:,} tokens")
+        print(f"    ├─ Transcript: {transcript_tokens:,} tokens")
+
+        # Decide whether to use chunking
+        if total_input_tokens > self.max_input_tokens:
+            print(f"    ├─ Total input ({total_input_tokens:,} tokens) exceeds safe limit ({self.max_input_tokens:,})")
+            print(f"    ├─ Using chunked summarization (chunk size: {self.chunk_target_tokens:,} tokens)")
+            return self._summarize_chunked(transcript, video_metadata, analysis_mode)
+        else:
+            utilization = (total_input_tokens / self.max_input_tokens) * 100
+            print(f"    ├─ Total input: {total_input_tokens:,} tokens ({utilization:.1f}% of limit)")
+            return self._summarize_single(transcript, video_metadata, analysis_mode)
+
+    def _summarize_single(self, transcript: str, video_metadata: Dict[str, any], analysis_mode: str) -> Dict[str, str]:
+        """
+        Generate summary from a single transcript (no chunking needed).
+
+        Args:
+            transcript: Video transcript text
+            video_metadata: Dictionary containing video information
+            analysis_mode: "basic" or "advanced"
+
+        Returns:
+            Dictionary containing summary, key points, and notes
+        """
         # Load system prompt from external file
         system_prompt = self._load_system_prompt()
 
@@ -94,13 +302,18 @@ class ContentSummarizer:
         prompt = self._create_summary_prompt(transcript, video_metadata, analysis_mode)
 
         try:
+            # Start progress indicator
+            self._stop_progress = False
+            self._char_count = 0
+            progress_thread = threading.Thread(target=self._show_streaming_progress)
+            progress_thread.daemon = True
+            progress_thread.start()
+
             # Call appropriate API based on model type
             if self.api_type == 'anthropic':
                 # Claude requires max_tokens parameter - use model maximum
                 # Sonnet 4.5 supports up to 64K output tokens
                 # Use streaming to avoid 10-minute timeout for long generations
-                print(f"[*] Generating (this may take several minutes for long videos)...")
-
                 summary_content = ""
                 with self.client.messages.stream(
                     model=self.model,
@@ -116,6 +329,7 @@ class ContentSummarizer:
                 ) as stream:
                     for text in stream.text_stream:
                         summary_content += text
+                        self._char_count = len(summary_content)
             else:
                 # OpenAI API (also used by OpenRouter with compatible interface)
                 completion_params = {
@@ -130,7 +344,8 @@ class ContentSummarizer:
                             "content": prompt
                         }
                     ],
-                    "temperature": 0.7
+                    "temperature": 0.7,
+                    "stream": True  # Enable streaming for progress
                 }
 
                 # For OpenAI models, max_tokens is optional
@@ -143,8 +358,21 @@ class ContentSummarizer:
                 # For GPT-4o, GPT-5, and OpenRouter models: don't limit output tokens
                 # Let the model use its full capacity
 
-                response = self.client.chat.completions.create(**completion_params)
-                summary_content = response.choices[0].message.content
+                summary_content = ""
+                stream = self.client.chat.completions.create(**completion_params)
+                for chunk in stream:
+                    if chunk.choices[0].delta.content:
+                        summary_content += chunk.choices[0].delta.content
+                        self._char_count = len(summary_content)
+
+            # Stop progress indicator
+            self._stop_progress = True
+            progress_thread.join(timeout=1)
+
+            # Clear the line and show completion
+            sys.stdout.write(f"\r{Fore.CYAN}    └─ Generated {len(summary_content):,} characters{' ' * 30}\n{Style.RESET_ALL}")
+            sys.stdout.flush()
+            print()
 
             # Generate formatted output
             formatted_output = self._format_output(summary_content, video_metadata)
@@ -162,9 +390,6 @@ class ContentSummarizer:
             with open(output_file, 'w', encoding='utf-8') as f:
                 f.write(formatted_output)
 
-            print(f"[+] Summary generated successfully")
-            print(f"[*] Saved to: {output_file}")
-
             return {
                 'summary': summary_content,
                 'formatted_output': formatted_output,
@@ -173,6 +398,194 @@ class ContentSummarizer:
 
         except Exception as e:
             raise Exception(f"Summarization failed: {str(e)}")
+
+    def _summarize_chunked(self, transcript: str, video_metadata: Dict[str, any], analysis_mode: str) -> Dict[str, str]:
+        """
+        Generate summary using map-reduce strategy for long transcripts.
+
+        Strategy:
+        1. MAP: Split transcript into chunks and summarize each
+        2. REDUCE: Combine chunk summaries into final comprehensive summary
+
+        Args:
+            transcript: Video transcript text
+            video_metadata: Dictionary containing video information
+            analysis_mode: "basic" or "advanced"
+
+        Returns:
+            Dictionary containing summary, key points, and notes
+        """
+        try:
+            # Step 1: Chunk the transcript
+            chunks = self._chunk_transcript(transcript, video_metadata)
+            num_chunks = len(chunks)
+
+            print(f"    ├─ Split into {num_chunks} chunks for processing")
+            print()
+
+            # Step 2: MAP - Summarize each chunk
+            chunk_summaries = []
+
+            for idx, (chunk_text, start_line, end_line) in enumerate(chunks, 1):
+                print(f"    ├─ Processing chunk {idx}/{num_chunks} (lines {start_line}-{end_line})")
+
+                # Create chunk-specific prompt
+                chunk_prompt = self._create_chunk_summary_prompt(chunk_text, idx, num_chunks, video_metadata, analysis_mode)
+                system_prompt = "You are an expert at analyzing and summarizing video transcripts. Focus on extracting key insights, quotes, and important details from this segment."
+
+                # Start progress indicator for this chunk
+                self._stop_progress = False
+                self._char_count = 0
+                progress_thread = threading.Thread(target=self._show_streaming_progress)
+                progress_thread.daemon = True
+                progress_thread.start()
+
+                # Summarize chunk
+                chunk_summary = ""
+                if self.api_type == 'anthropic':
+                    with self.client.messages.stream(
+                        model=self.model,
+                        max_tokens=16000,  # Smaller output for chunks
+                        temperature=0.7,
+                        system=system_prompt,
+                        messages=[{"role": "user", "content": chunk_prompt}]
+                    ) as stream:
+                        for text in stream.text_stream:
+                            chunk_summary += text
+                            self._char_count = len(chunk_summary)
+                else:
+                    stream = self.client.chat.completions.create(
+                        model=self.model,
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": chunk_prompt}
+                        ],
+                        temperature=0.7,
+                        stream=True
+                    )
+                    for chunk in stream:
+                        if chunk.choices[0].delta.content:
+                            chunk_summary += chunk.choices[0].delta.content
+                            self._char_count = len(chunk_summary)
+
+                # Stop progress
+                self._stop_progress = True
+                progress_thread.join(timeout=1)
+
+                chunk_summaries.append(chunk_summary)
+                print(f"\r{Fore.CYAN}    │  └─ Chunk {idx}/{num_chunks} complete ({len(chunk_summary):,} chars){' ' * 20}{Style.RESET_ALL}")
+                print()
+
+            # Step 3: REDUCE - Combine chunk summaries into final summary
+            print(f"    ├─ Combining {num_chunks} chunk summaries into final summary")
+
+            combined_prompt = self._create_reduce_summary_prompt(chunk_summaries, video_metadata, analysis_mode)
+            system_prompt = self._load_system_prompt()
+
+            # Start progress indicator for final summary
+            self._stop_progress = False
+            self._char_count = 0
+            progress_thread = threading.Thread(target=self._show_streaming_progress)
+            progress_thread.daemon = True
+            progress_thread.start()
+
+            # Generate final summary
+            summary_content = ""
+            if self.api_type == 'anthropic':
+                with self.client.messages.stream(
+                    model=self.model,
+                    max_tokens=64000,
+                    temperature=0.7,
+                    system=system_prompt,
+                    messages=[{"role": "user", "content": combined_prompt}]
+                ) as stream:
+                    for text in stream.text_stream:
+                        summary_content += text
+                        self._char_count = len(summary_content)
+            else:
+                stream = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": combined_prompt}
+                    ],
+                    temperature=0.7,
+                    stream=True
+                )
+                for chunk in stream:
+                    if chunk.choices[0].delta.content:
+                        summary_content += chunk.choices[0].delta.content
+                        self._char_count = len(summary_content)
+
+            # Stop progress
+            self._stop_progress = True
+            progress_thread.join(timeout=1)
+
+            sys.stdout.write(f"\r{Fore.CYAN}    └─ Generated {len(summary_content):,} characters{' ' * 30}\n{Style.RESET_ALL}")
+            sys.stdout.flush()
+            print()
+
+            # Generate formatted output
+            formatted_output = self._format_output(summary_content, video_metadata)
+
+            # Extract video ID and create filename
+            video_id = self._extract_video_id(video_metadata.get('url', ''))
+            if video_id:
+                filename = f"YT_{video_id}_{self._sanitize_filename(video_metadata['title'])}_summary.md"
+            else:
+                filename = f"{self._sanitize_filename(video_metadata['title'])}_summary.md"
+
+            # Save to file
+            output_file = self.output_dir / filename
+            with open(output_file, 'w', encoding='utf-8') as f:
+                f.write(formatted_output)
+
+            return {
+                'summary': summary_content,
+                'formatted_output': formatted_output,
+                'output_file': str(output_file)
+            }
+
+        except Exception as e:
+            raise Exception(f"Chunked summarization failed: {str(e)}")
+
+    def _create_chunk_summary_prompt(self, chunk_text: str, chunk_num: int, total_chunks: int,
+                                     metadata: Dict, analysis_mode: str) -> str:
+        """Create prompt for summarizing a single chunk."""
+        return f"""This is segment {chunk_num} of {total_chunks} from a video titled: "{metadata.get('title', 'Unknown')}"
+
+Please extract and summarize the key information from this segment:
+- Main topics and themes discussed
+- Important quotes or statements
+- Key insights and takeaways
+- Any technical details or specific information
+
+Keep your summary focused and detailed. This will be combined with other segments later.
+
+TRANSCRIPT SEGMENT:
+{chunk_text}
+"""
+
+    def _create_reduce_summary_prompt(self, chunk_summaries: List[str], metadata: Dict, analysis_mode: str) -> str:
+        """Create prompt for combining chunk summaries into final summary."""
+        combined_summaries = "\n\n---\n\n".join([f"SEGMENT {i+1} SUMMARY:\n{summary}" for i, summary in enumerate(chunk_summaries)])
+
+        return f"""I have provided summaries of {len(chunk_summaries)} segments from a video titled: "{metadata.get('title', 'Unknown')}"
+
+Please create a comprehensive, well-structured final summary by combining these segment summaries.
+
+Your task:
+1. Synthesize all segment summaries into a cohesive narrative
+2. Identify overarching themes and key topics
+3. Extract the most important quotes and insights
+4. Organize information logically (not just chronologically)
+5. Create a summary following the {analysis_mode} analysis format
+
+SEGMENT SUMMARIES:
+{combined_summaries}
+
+Now create the comprehensive final summary following the standard format for {analysis_mode} mode.
+"""
 
     def _load_system_prompt(self) -> str:
         """
@@ -382,20 +795,20 @@ class ContentSummarizer:
 
             header_parts.append("")
 
-        # Section 4: Video Description (if available)
-        description = metadata.get('description', '')
-        if description:
-            header_parts.append("### Video Description")
-            header_parts.append(description)
-            header_parts.append("")
-
-        # Section 5: Processing Information
+        # Section 4: Processing Information
         header_parts.append("### Processing Information")
         header_parts.append(f"**Transcription Model:** {transcription_display}")
         header_parts.append(f"**Summarization Model:** {summary_display}")
         header_parts.append(f"**Summary Mode:** {mode_display}")
         header_parts.append(f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         header_parts.append("")
+
+        # Section 5: Video Description (if available) - placed last as it can be very long
+        description = metadata.get('description', '')
+        if description:
+            header_parts.append("### Video Description")
+            header_parts.append(description)
+            header_parts.append("")
 
         header_parts.append("---")
         header_parts.append("")
