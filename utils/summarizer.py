@@ -71,6 +71,20 @@ class ContentSummarizer:
             if not self.api_key:
                 raise ValueError("Anthropic API key not found. Set ANTHROPIC_API_KEY environment variable.")
             self.client = Anthropic(api_key=self.api_key)
+        elif model.startswith('gemini-2.5') or model.startswith('gemini-2.0'):
+            # Gemini CLI (local) in YOLO mode
+            self.api_type = 'gemini-cli'
+            self.client = None  # Uses CLI commands
+            # Check if Gemini CLI is installed
+            import subprocess
+            try:
+                result = subprocess.run(['gemini', '--version'], capture_output=True, text=True, timeout=5)
+                if result.returncode != 0:
+                    raise ValueError("Gemini CLI not found. Install: npm install -g @google/generative-ai-cli")
+            except FileNotFoundError:
+                raise ValueError("Gemini CLI not installed. Install: npm install -g @google/generative-ai-cli")
+            except subprocess.TimeoutExpired:
+                raise ValueError("Gemini CLI is not responding")
         elif model.startswith('openrouter/'):
             # OpenRouter uses OpenAI-compatible API
             self.api_type = 'openrouter'
@@ -124,10 +138,13 @@ class ContentSummarizer:
             'o1': 200000,
             'o3': 200000,
 
+            # Gemini via CLI (local)
+            'gemini-2.5-pro': 2000000,  # 2M tokens
+            'gemini-2.0-flash': 1000000,  # 1M tokens
+
             # Gemini via OpenRouter
             'gemini-1.5-pro': 2000000,
             'gemini-1.5-flash': 1000000,
-            'gemini-2.0-flash': 1000000,
             'google/gemini': 1000000,  # OpenRouter prefix
 
             # Other OpenRouter models
@@ -242,6 +259,56 @@ class ContentSummarizer:
 
             time.sleep(0.5)
 
+    def _call_gemini_cli(self, system_prompt: str, user_prompt: str) -> str:
+        """
+        Call Gemini CLI in YOLO mode (non-interactive).
+
+        Uses the gemini CLI tool with YOLO mode (-y) to auto-approve any tool usage.
+        Command format: gemini -m MODEL -o text -y "PROMPT"
+
+        Args:
+            system_prompt: System instructions
+            user_prompt: User prompt with transcript
+
+        Returns:
+            Generated summary text
+        """
+        import subprocess
+        import tempfile
+
+        # Combine prompts
+        full_prompt = f"{system_prompt}\n\n{user_prompt}"
+
+        # Write to temp file for large prompts
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
+            f.write(full_prompt)
+            prompt_file = f.name
+
+        try:
+            # Use YOLO mode (-y) and text output (-o text)
+            # Read prompt from file via stdin
+            with open(prompt_file, 'r', encoding='utf-8') as f:
+                result = subprocess.run(
+                    ['gemini', '-m', self.model, '-o', 'text', '-y'],
+                    stdin=f,
+                    capture_output=True,
+                    text=True,
+                    timeout=600  # 10 minute timeout for long summaries
+                )
+
+            if result.returncode != 0:
+                raise Exception(f"Gemini CLI error: {result.stderr}")
+
+            return result.stdout.strip()
+
+        finally:
+            # Clean up temp file
+            import os as os_module
+            try:
+                os_module.unlink(prompt_file)
+            except:
+                pass
+
     def summarize(self, transcript: str, video_metadata: Dict[str, any],
                   analysis_mode: str = "advanced", transcription_engine: str = "whisper") -> Dict[str, str]:
         """
@@ -330,6 +397,12 @@ class ContentSummarizer:
                     for text in stream.text_stream:
                         summary_content += text
                         self._char_count = len(summary_content)
+            elif self.api_type == 'gemini-cli':
+                # Gemini CLI in YOLO mode
+                # Note: Gemini CLI doesn't support streaming, so we can't show real-time progress
+                # We'll just show elapsed time until completion
+                summary_content = self._call_gemini_cli(system_prompt, prompt)
+                self._char_count = len(summary_content)
             else:
                 # OpenAI API (also used by OpenRouter with compatible interface)
                 completion_params = {
@@ -453,6 +526,9 @@ class ContentSummarizer:
                         for text in stream.text_stream:
                             chunk_summary += text
                             self._char_count = len(chunk_summary)
+                elif self.api_type == 'gemini-cli':
+                    chunk_summary = self._call_gemini_cli(system_prompt, chunk_prompt)
+                    self._char_count = len(chunk_summary)
                 else:
                     stream = self.client.chat.completions.create(
                         model=self.model,
@@ -502,6 +578,9 @@ class ContentSummarizer:
                     for text in stream.text_stream:
                         summary_content += text
                         self._char_count = len(summary_content)
+            elif self.api_type == 'gemini-cli':
+                summary_content = self._call_gemini_cli(system_prompt, combined_prompt)
+                self._char_count = len(summary_content)
             else:
                 stream = self.client.chat.completions.create(
                     model=self.model,
@@ -723,6 +802,8 @@ Now create the comprehensive final summary following the standard format for {an
             summary_display = f"Anthropic {self.model}"
         elif self.api_type == 'openrouter':
             summary_display = f"OpenRouter: {self.model}"
+        elif self.api_type == 'gemini-cli':
+            summary_display = f"Gemini CLI ({self.model})"
         else:
             summary_display = f"OpenAI {self.model}"
 

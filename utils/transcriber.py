@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 from typing import Dict, Optional
 from colorama import Fore, Style
+from datetime import datetime
 
 
 class AudioTranscriber:
@@ -47,31 +48,26 @@ class AudioTranscriber:
         os.makedirs(whisper_cache, exist_ok=True)
 
         if use_elevenlabs:
-            print(f"[*] Using ElevenLabs cloud transcription (99 languages, speaker diarization)")
+            print(f"    ├─ Using ElevenLabs cloud transcription")
             if not self.elevenlabs_api_key:
-                print(f"{Fore.YELLOW}[!] Warning: No ELEVENLABS_API_KEY found.{Style.RESET_ALL}")
-                print(f"{Fore.YELLOW}    Set ELEVENLABS_API_KEY environment variable or pass elevenlabs_api_key parameter.{Style.RESET_ALL}")
-                print(f"{Fore.YELLOW}    Transcription will fail without a valid API key.{Style.RESET_ALL}")
-            print(f"[+] ElevenLabs initialized")
+                print(f"{Fore.YELLOW}    ├─ Warning: No ELEVENLABS_API_KEY found.{Style.RESET_ALL}")
+                print(f"{Fore.YELLOW}    └─ Transcription will fail without a valid API key.{Style.RESET_ALL}")
             self.model = None  # No local model needed for ElevenLabs
         elif use_whisperx:
-            print(f"[*] Using WhisperX with speaker diarization")
+            print(f"    ├─ Using WhisperX with speaker diarization")
             if not self.hf_token:
-                print(f"{Fore.YELLOW}[!] Warning: No HF_TOKEN found. Speaker diarization will be disabled.{Style.RESET_ALL}")
-                print(f"{Fore.YELLOW}    Set HF_TOKEN environment variable or pass hf_token parameter.{Style.RESET_ALL}")
+                print(f"{Fore.YELLOW}    ├─ Warning: No HF_TOKEN found. Speaker diarization will be disabled.{Style.RESET_ALL}")
             # WhisperX models are loaded per-transcription for efficiency
-            print(f"[+] WhisperX initialized (model will load on first use)")
+            print(f"    ├─ WhisperX initialized (model will load on first use)")
 
             # Load vanilla Whisper as fallback in case WhisperX fails (CUDA issues, etc.)
-            print(f"[*] Loading vanilla Whisper as fallback: {model_name}")
-            print(f"[*] Model cache: {whisper_cache}")
+            print(f"    ├─ Loading vanilla Whisper as fallback: {model_name}")
             self.model = whisper.load_model(model_name, download_root=whisper_cache)
-            print(f"[+] Fallback model loaded successfully")
+            print(f"    └─ Fallback model loaded")
         else:
-            print(f"[*] Loading Whisper model: {model_name}")
-            print(f"[*] Model cache: {whisper_cache}")
+            print(f"    ├─ Loading Whisper model: {model_name}")
             self.model = whisper.load_model(model_name, download_root=whisper_cache)
-            print(f"[+] Model loaded successfully")
+            print(f"    └─ Model loaded")
 
     def _get_audio_duration(self, audio_file: str) -> float:
         """Get duration of audio file in seconds using ffprobe."""
@@ -163,10 +159,10 @@ class AudioTranscriber:
             raise FileNotFoundError(f"Audio file not found: {audio_file}")
 
         try:
-            print(f"[*] Transcribing: {audio_path.name}")
+            print(f"    ├─ File: {audio_path.name}")
         except UnicodeEncodeError:
             # Fallback for console encoding issues
-            print(f"[*] Transcribing audio file...")
+            print(f"    ├─ File: [audio file]")
 
         # Route to appropriate transcription method
         if self.use_elevenlabs:
@@ -228,7 +224,7 @@ class AudioTranscriber:
                 progress_thread.join(timeout=1)
 
             # Clear the line and show completion (matching download bar)
-            sys.stdout.write(f"\r{Fore.CYAN}{'-' * 80}\n{Style.RESET_ALL}")
+            sys.stdout.write(f"\r{Fore.CYAN}    └─ Transcription complete ({result['language']}){' ' * 30}\n{Style.RESET_ALL}")
             sys.stdout.flush()
             print()  # Space below
 
@@ -251,13 +247,6 @@ class AudioTranscriber:
             with open(md_file, 'w', encoding='utf-8') as f:
                 f.write(markdown_content)
 
-            print(f"[+] Transcription complete")
-            print(f"Detected language: {result['language']}")
-            try:
-                print(f"[*] Saved to: {md_file}")
-            except UnicodeEncodeError:
-                print(f"[*] Files saved to transcripts directory")
-
             return {
                 'text': plain_text,  # Send clean text to LLM
                 'language': result['language'],
@@ -276,7 +265,7 @@ class AudioTranscriber:
             device = "cuda" if torch.cuda.is_available() else "cpu"
             compute_type = "float16" if device == "cuda" else "int8"
 
-            print(f"[*] Using device: {device}")
+            print(f"    ├─ Using device: {device}")
 
             # Get audio duration for progress estimation
             duration = self._get_audio_duration(str(audio_path))
@@ -302,17 +291,17 @@ class AudioTranscriber:
                 progress_thread.join(timeout=1)
 
             # Clear the line
-            sys.stdout.write(f"\r{Fore.CYAN}{'-' * 80}\n{Style.RESET_ALL}")
+            sys.stdout.write(f"\r{Fore.CYAN}    ├─ Base transcription complete{' ' * 30}\n{Style.RESET_ALL}")
             sys.stdout.flush()
 
             # Align whisper output
-            print(f"[*] Aligning transcript...")
+            print(f"    ├─ Aligning transcript...")
             model_a, metadata = whisperx.load_align_model(language_code=result["language"], device=device)
             result = whisperx.align(result["segments"], model_a, metadata, audio, device, return_char_alignments=False)
 
             # Perform speaker diarization if HF token is available
             if self.hf_token:
-                print(f"[*] Performing speaker diarization...")
+                print(f"    ├─ Performing speaker diarization...")
                 from pyannote.audio import Pipeline
                 diarize_model = Pipeline.from_pretrained(
                     "pyannote/speaker-diarization-3.1",
@@ -321,6 +310,7 @@ class AudioTranscriber:
                 diarize_segments = diarize_model(str(audio_path))
                 result = whisperx.assign_word_speakers(diarize_segments, result)
 
+            print(f"    └─ WhisperX complete ({result.get('language', 'unknown')})")
             print()  # Space below
 
             # Format transcript with speaker labels
@@ -365,15 +355,6 @@ class AudioTranscriber:
             md_file = self.output_dir / f"{audio_path.stem}_transcript.md"
             with open(md_file, 'w', encoding='utf-8') as f:
                 f.write(markdown_content)
-
-            print(f"[+] Transcription complete")
-            print(f"Detected language: {result.get('language', 'unknown')}")
-            if self.hf_token:
-                print(f"[+] Speaker diarization complete")
-            try:
-                print(f"[*] Saved to: {md_file}")
-            except UnicodeEncodeError:
-                print(f"[*] Files saved to transcripts directory")
 
             return {
                 'text': plain_text,
@@ -421,16 +402,192 @@ class AudioTranscriber:
             except Exception as fallback_error:
                 raise Exception(f"Both WhisperX and Whisper failed. WhisperX: {str(e)}, Whisper: {str(fallback_error)}")
 
+    def _save_transcription_job(self, video_id: str, transcription_id: str, metadata: Dict) -> None:
+        """
+        Save transcription job ID for resume capability.
+
+        Args:
+            video_id: YouTube video ID (e.g., "R8TqBrrqL4U")
+            transcription_id: ElevenLabs transcription ID
+            metadata: Additional job metadata (audio_path, submitted_at, etc.)
+        """
+        jobs_dir = Path(".transcription_jobs")
+        jobs_dir.mkdir(exist_ok=True)
+
+        job_file = jobs_dir / f"{video_id}.json"
+        job_data = {
+            "transcription_id": transcription_id,
+            "video_id": video_id,
+            "submitted_at": datetime.now().isoformat(),
+            **metadata
+        }
+
+        with open(job_file, 'w') as f:
+            json.dump(job_data, f, indent=2)
+
+    def _load_transcription_job(self, video_id: str) -> Optional[Dict]:
+        """
+        Load existing transcription job if available.
+
+        Args:
+            video_id: YouTube video ID
+
+        Returns:
+            Job data dict if found, None otherwise
+        """
+        jobs_dir = Path(".transcription_jobs")
+        job_file = jobs_dir / f"{video_id}.json"
+
+        if job_file.exists():
+            try:
+                with open(job_file, 'r') as f:
+                    return json.load(f)
+            except:
+                return None
+        return None
+
+    def _delete_transcription_job(self, video_id: str) -> None:
+        """
+        Delete transcription job file after completion.
+
+        Args:
+            video_id: YouTube video ID
+        """
+        jobs_dir = Path(".transcription_jobs")
+        job_file = jobs_dir / f"{video_id}.json"
+
+        if job_file.exists():
+            job_file.unlink()
+
+    def _process_elevenlabs_result(self, response, audio_path: Path, duration: float) -> Dict[str, any]:
+        """
+        Process ElevenLabs transcription result (shared by sync and async).
+
+        Args:
+            response: ElevenLabs API response object
+            audio_path: Path to audio file
+            duration: Audio duration in seconds
+
+        Returns:
+            Dictionary containing transcription results
+        """
+        # Extract transcript data from response with speaker diarization
+        plain_text = ""
+
+        # Check for speaker diarization in additional_formats (SRT)
+        if hasattr(response, 'additional_formats') and response.additional_formats:
+            # additional_formats is a list of AdditionalFormatResponseModel objects
+            # Find segmented_json (includes speaker labels AND timestamps)
+            json_format = None
+            for fmt in response.additional_formats:
+                if hasattr(fmt, 'requested_format') and fmt.requested_format == 'segmented_json':
+                    json_format = fmt
+                    break
+
+            # Parse segmented_json for speaker labels, audio events, and timestamps
+            if json_format and hasattr(json_format, 'content') and json_format.content:
+                import json as json_lib
+                json_data = json_lib.loads(json_format.content)
+
+                # Parse word-level data with speaker_id from segmented_json
+                # Structure: {"segments": [{"words": [{"text": "I", "start": 11.76, "speaker_id": "speaker_0", ...}]}]}
+                transcript_lines = []
+                current_speaker = None
+                current_words = []
+                current_start = None
+
+                # Extract words with speaker_id and timestamps
+                for segment in json_data.get('segments', []):
+                    for word in segment.get('words', []):
+                        word_type = word.get('type', 'word')
+                        speaker = word.get('speaker_id', 'speaker_0')
+                        word_text = word.get('text', '')
+                        word_start = word.get('start', 0)
+
+                        # Skip empty text but keep all types (words, spacing, punctuation, audio_events)
+                        if not word_text:
+                            continue
+
+                        # New speaker detected (only on word/audio_event, not spacing)
+                        if word_type in ['word', 'audio_event'] and speaker != current_speaker:
+                            # Save previous segment
+                            if current_words and current_start is not None:
+                                timestamp = self._format_timestamp(current_start)
+                                text = ''.join(current_words).strip()
+                                if text:  # Only add non-empty segments
+                                    transcript_lines.append(
+                                        f"**[{current_speaker.upper()}]** `[{timestamp}]` {text}\n"
+                                    )
+                            # Start new segment
+                            current_speaker = speaker
+                            current_words = [word_text]
+                            current_start = word_start
+                        else:
+                            # Same speaker - continue (include ALL text: words, spacing, punctuation)
+                            current_words.append(word_text)
+
+                # Add final segment
+                if current_words and current_start is not None:
+                    timestamp = self._format_timestamp(current_start)
+                    text = ''.join(current_words).strip()
+                    if text:
+                        transcript_lines.append(
+                            f"**[{current_speaker.upper()}]** `[{timestamp}]` {text}\n"
+                        )
+
+                plain_text = '\n'.join(transcript_lines)
+            else:
+                # No SRT format, fall back to plain text
+                plain_text = response.text if hasattr(response, 'text') else ""
+        else:
+            # No additional_formats, use plain text
+            plain_text = response.text if hasattr(response, 'text') else ""
+
+        # Get language from response
+        detected_language = response.language_code if hasattr(response, 'language_code') else "unknown"
+
+        # Create markdown header with metadata
+        markdown_content = f"""# Transcript
+
+**Language:** {detected_language}
+**Duration:** {self._format_timestamp(duration)}
+**Transcription:** ElevenLabs (Speaker Diarization + Audio Events)
+
+---
+
+{plain_text}
+"""
+
+        # Save as Markdown file
+        md_file = self.output_dir / f"{audio_path.stem}_transcript.md"
+        with open(md_file, 'w', encoding='utf-8') as f:
+            f.write(markdown_content)
+
+        return {
+            'text': plain_text,
+            'language': detected_language,
+            'text_file': str(md_file)
+        }
+
     def _transcribe_elevenlabs(self, audio_path: Path, language: Optional[str], podcast_mode: bool) -> Dict[str, any]:
-        """Transcribe using ElevenLabs cloud API (synchronous)."""
+        """Transcribe using ElevenLabs cloud API with async polling."""
         try:
             from elevenlabs.client import ElevenLabs
 
             if not self.elevenlabs_api_key:
                 raise Exception("ElevenLabs API key not found. Set ELEVENLABS_API_KEY environment variable.")
 
-            print(f"[*] Initializing ElevenLabs client...")
-            client = ElevenLabs(api_key=self.elevenlabs_api_key)
+            # Extract video ID from filename (format: YT_{VIDEO_ID}_Title.mp3)
+            filename = audio_path.stem
+            video_id = None
+            if filename.startswith('YT_'):
+                parts = filename.split('_')
+                if len(parts) >= 2:
+                    video_id = parts[1]
+
+            print(f"    ├─ Initializing ElevenLabs client...")
+            # Extended timeout for synchronous mode (up to 2 hours for very long transcriptions)
+            client = ElevenLabs(api_key=self.elevenlabs_api_key, timeout=7200)
 
             # Check file size (max 3GB) and duration (max 10 hours)
             file_size = audio_path.stat().st_size
@@ -442,148 +599,122 @@ class AudioTranscriber:
             if duration > 36000:  # 10 hours
                 raise Exception(f"Audio duration ({duration/3600:.1f} hours) exceeds ElevenLabs limit of 10 hours. Use Whisper instead.")
 
-            # Upload and submit transcription job
-            print(f"[*] Uploading and transcribing audio with ElevenLabs ({file_size_gb:.2f} GB)...")
-            print(f"[*] Audio duration: {self._format_timestamp(duration)}")
-            print(f"[*] This may take a few minutes...")
-            print()
+            transcription_id = None
 
-            # Open file and submit for transcription (synchronous)
-            with open(audio_path, 'rb') as audio_file:
-                # Using Speech to Text API with speaker diarization and audio events
-                # Build parameters dict
-                params = {
-                    "model_id": "scribe_v2",  # Use latest V2 model
-                    "file": audio_file,
-                    "diarize": True,  # Enable speaker diarization
-                    "diarization_threshold": 0.15,  # Balanced threshold (range: 0.1-0.4, default: 0.22)
-                    "tag_audio_events": True,  # Enable laughter, applause, etc.
-                    "additional_formats": [
-                        {"format": "srt"},  # For timestamps
-                        {"format": "segmented_json"}  # For speaker labels (SRT doesn't include them!)
-                    ]
-                }
-                # Note: diarization_threshold can only be set when num_speakers=None
-                # Lower threshold = more speakers detected (risk: may split one speaker into multiple)
-                # Higher threshold = fewer speakers detected (risk: may merge different speakers into one)
-                # Using 0.15 for balanced detection - reduces over-segmentation while still detecting genuine speakers
+            # Check for existing job first
+            if video_id:
+                existing_job = self._load_transcription_job(video_id)
+                if existing_job:
+                    transcription_id = existing_job.get('transcription_id')
+                    print(f"{Fore.GREEN}    ├─ Found existing job: {transcription_id}{Style.RESET_ALL}")
+                    print(f"{Fore.GREEN}    └─ Resuming polling (no re-upload needed){Style.RESET_ALL}")
+                    print()
 
-                # Only add language_code if explicitly provided (omit for auto-detect)
-                if language:
-                    params["language_code"] = language
+            # Submit new async job if no existing job
+            if not transcription_id:
+                print(f"    ├─ Submitting to ElevenLabs ({file_size_gb:.2f} GB, {self._format_timestamp(duration)})")
+                print(f"    ├─ Estimated time: ~{self._format_timestamp(duration * 0.15)} (15% of duration)")
+                print()
 
-                response = client.speech_to_text.convert(**params)
+                # Open file and submit for synchronous transcription with streaming
+                with open(audio_path, 'rb') as audio_file:
+                    # Using Speech to Text API with speaker diarization and audio events
+                    params = {
+                        "model_id": "scribe_v2",  # Use latest V2 model
+                        "file": audio_file,
+                        "diarize": True,  # Enable speaker diarization
+                        "diarization_threshold": 0.15,  # Balanced threshold (range: 0.1-0.4, default: 0.22)
+                        "tag_audio_events": True,  # Enable laughter, applause, etc.
+                        "additional_formats": [
+                            {"format": "srt"},  # For timestamps
+                            {"format": "segmented_json"}  # For speaker labels
+                        ]
+                    }
 
-            print(f"[+] Transcription complete!")
-            print()
+                    # Only add language_code if explicitly provided (omit for auto-detect)
+                    if language:
+                        params["language_code"] = language
 
-            # Extract transcript data from response with speaker diarization
-            plain_text = ""
+                    # Submit and wait for response (blocks until complete)
+                    print(f"    ├─ Uploading and transcribing...")
+                    print()
 
-            # Check for speaker diarization in additional_formats (SRT)
-            if hasattr(response, 'additional_formats') and response.additional_formats:
-                print(f"[*] Processing transcription with speaker diarization and audio events...")
+                    response = client.speech_to_text.convert(**params)
 
-                # additional_formats is a list of AdditionalFormatResponseModel objects
-                # Find segmented_json (includes speaker labels AND timestamps)
-                json_format = None
-                for fmt in response.additional_formats:
-                    if hasattr(fmt, 'requested_format') and fmt.requested_format == 'segmented_json':
-                        json_format = fmt
-                        break
+                print(f"{Fore.GREEN}    └─ ElevenLabs complete!{Style.RESET_ALL}")
+                print()
 
-                # Parse segmented_json for speaker labels, audio events, and timestamps
-                if json_format and hasattr(json_format, 'content') and json_format.content:
-                    import json as json_lib
-                    json_data = json_lib.loads(json_format.content)
+                # Extract and save transcription_id for future reference
+                if hasattr(response, 'transcription_id'):
+                    transcription_id = response.transcription_id
+                    if video_id:
+                        metadata = {
+                            "audio_path": str(audio_path),
+                            "file_size_gb": file_size_gb,
+                            "duration": duration,
+                            "language": language,
+                            "completed": True
+                        }
+                        self._save_transcription_job(video_id, transcription_id, metadata)
 
-                    # Parse word-level data with speaker_id from segmented_json
-                    # Structure: {"segments": [{"words": [{"text": "I", "start": 11.76, "speaker_id": "speaker_0", ...}]}]}
-                    transcript_lines = []
-                    current_speaker = None
-                    current_words = []
-                    current_start = None
+                # Process result using helper method
+                final_result = self._process_elevenlabs_result(response, audio_path, duration)
 
-                    # Extract words with speaker_id and timestamps
-                    for segment in json_data.get('segments', []):
-                        for word in segment.get('words', []):
-                            word_type = word.get('type', 'word')
-                            speaker = word.get('speaker_id', 'speaker_0')
-                            word_text = word.get('text', '')
-                            word_start = word.get('start', 0)
+                # Delete job file on success
+                if video_id:
+                    self._delete_transcription_job(video_id)
 
-                            # Skip empty text but keep all types (words, spacing, punctuation, audio_events)
-                            if not word_text:
-                                continue
-
-                            # New speaker detected (only on word/audio_event, not spacing)
-                            if word_type in ['word', 'audio_event'] and speaker != current_speaker:
-                                # Save previous segment
-                                if current_words and current_start is not None:
-                                    timestamp = self._format_timestamp(current_start)
-                                    text = ''.join(current_words).strip()
-                                    if text:  # Only add non-empty segments
-                                        transcript_lines.append(
-                                            f"**[{current_speaker.upper()}]** `[{timestamp}]` {text}\n"
-                                        )
-                                # Start new segment
-                                current_speaker = speaker
-                                current_words = [word_text]
-                                current_start = word_start
-                            else:
-                                # Same speaker - continue (include ALL text: words, spacing, punctuation)
-                                current_words.append(word_text)
-
-                    # Add final segment
-                    if current_words and current_start is not None:
-                        timestamp = self._format_timestamp(current_start)
-                        text = ''.join(current_words).strip()
-                        if text:
-                            transcript_lines.append(
-                                f"**[{current_speaker.upper()}]** `[{timestamp}]` {text}\n"
-                            )
-
-                    plain_text = '\n'.join(transcript_lines)
-                    print(f"[+] Speaker diarization and timestamps extracted from word-level data")
-                    print(f"[*] Timestamps preserved for YouTube bookmarks")
-                else:
-                    # No SRT format, fall back to plain text
-                    plain_text = response.text if hasattr(response, 'text') else ""
+                return final_result
             else:
-                # No additional_formats, use plain text
-                plain_text = response.text if hasattr(response, 'text') else ""
+                # Existing job found - try to poll for it
+                poll_interval = 10  # Check every 10 seconds
+                max_wait = 7200  # 2 hours max
+                elapsed = 0
+                last_update = 0
+                update_interval = 30  # Show progress update every 30 seconds
 
-            # Get language from response
-            detected_language = response.language_code if hasattr(response, 'language_code') else "unknown"
+                print(f"[*] Polling for transcription completion...")
+                print()
 
-            # Create markdown header with metadata
-            markdown_content = f"""# Transcript
+                while elapsed < max_wait:
+                    try:
+                        # Try to get transcript
+                        result = client.speech_to_text.transcripts.get(transcription_id)
 
-**Language:** {detected_language}
-**Duration:** {self._format_timestamp(duration)}
-**Transcription:** ElevenLabs (Speaker Diarization + Audio Events)
+                        # Check if complete (has text attribute with content)
+                        if hasattr(result, 'text') and result.text:
+                            print(f"\r{Fore.GREEN}[+] Transcription complete after {self._format_timestamp(elapsed)}!{Style.RESET_ALL}")
+                            print()
 
----
+                            # Process result using helper method
+                            final_result = self._process_elevenlabs_result(result, audio_path, duration)
 
-{plain_text}
-"""
+                            # Delete job file on success
+                            if video_id:
+                                self._delete_transcription_job(video_id)
 
-            # Save as Markdown file
-            md_file = self.output_dir / f"{audio_path.stem}_transcript.md"
-            with open(md_file, 'w', encoding='utf-8') as f:
-                f.write(markdown_content)
+                            return final_result
 
-            print(f"[+] Detected language: {detected_language}")
-            try:
-                print(f"[*] Saved to: {md_file}")
-            except UnicodeEncodeError:
-                print(f"[*] Files saved to transcripts directory")
+                    except Exception as e:
+                        error_str = str(e).lower()
+                        # 404 or "not found" means still processing or doesn't exist
+                        if '404' in error_str or 'not found' in error_str:
+                            pass  # Still processing, continue polling
+                        else:
+                            # Unexpected error - re-raise
+                            raise
 
-            return {
-                'text': plain_text,
-                'language': detected_language,
-                'text_file': str(md_file)
-            }
+                    # Show progress update periodically
+                    if elapsed - last_update >= update_interval:
+                        sys.stdout.write(f"\r{Fore.CYAN}[*] Waiting for transcription... {self._format_timestamp(elapsed)} elapsed{Style.RESET_ALL}")
+                        sys.stdout.flush()
+                        last_update = elapsed
+
+                    time.sleep(poll_interval)
+                    elapsed += poll_interval
+
+                # Timeout - job ID is still saved for manual resume
+                raise TimeoutError(f"Transcription not ready after {max_wait} seconds. Job ID {transcription_id} saved for resume.")
 
         except Exception as e:
             error_msg = str(e).lower()

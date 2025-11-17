@@ -647,6 +647,30 @@ def select_summary_model():
         print(f"    {Fore.WHITE}{models[str(model_num)]['desc']}{Style.RESET_ALL}\n")
         model_num += 1
 
+    # Check for Gemini CLI (local installation)
+    has_gemini_cli = False
+    try:
+        import subprocess
+        result = subprocess.run(['gemini', '--version'], capture_output=True, text=True, timeout=5)
+        has_gemini_cli = (result.returncode == 0)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        has_gemini_cli = False
+
+    if has_gemini_cli:
+        print(f"{Fore.GREEN}{'='*70}{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}  GOOGLE GEMINI MODELS (via Gemini CLI - Local){Style.RESET_ALL}")
+        print(f"{Fore.GREEN}{'='*70}{Style.RESET_ALL}\n")
+
+        # Gemini 2.5 Pro CLI
+        models[str(model_num)] = {'name': 'gemini-2.5-pro', 'provider': 'Google',
+                                   'cost': '$0.00', 'speed': 'Fast', 'quality': 'Excellent',
+                                   'desc': '2M context window! Handles 100+ hour videos, runs locally'}
+        print(f"{Fore.GREEN}[{model_num}]{Style.RESET_ALL} {Fore.WHITE}{Style.BRIGHT}GEMINI 2.5 PRO{Style.RESET_ALL} "
+              f"{Fore.CYAN}[LOCAL, 2M CONTEXT]{Style.RESET_ALL}")
+        print(f"    {Fore.CYAN}Speed:{Style.RESET_ALL} Fast       {Fore.CYAN}Cost:{Style.RESET_ALL} FREE      {Fore.CYAN}Quality:{Style.RESET_ALL} Excellent")
+        print(f"    {Fore.WHITE}{models[str(model_num)]['desc']}{Style.RESET_ALL}\n")
+        model_num += 1
+
     # Check for OpenRouter API key (for Gemini and other models)
     has_openrouter = bool(os.getenv("OPENROUTER_API_KEY"))
 
@@ -655,7 +679,7 @@ def select_summary_model():
         print(f"{Fore.GREEN}  GOOGLE GEMINI MODELS (via OpenRouter){Style.RESET_ALL}")
         print(f"{Fore.GREEN}{'='*70}{Style.RESET_ALL}\n")
 
-        # Gemini 2.5 Flash
+        # Gemini 2.0 Flash
         models[str(model_num)] = {'name': 'openrouter/google/gemini-2.0-flash-exp:free', 'provider': 'Google',
                                    'cost': '$0.00', 'speed': 'Very Fast', 'quality': 'Great',
                                    'desc': '1M context, FREE! Great for long videos, fast response times'}
@@ -665,7 +689,7 @@ def select_summary_model():
         print(f"    {Fore.WHITE}{models[str(model_num)]['desc']}{Style.RESET_ALL}\n")
         model_num += 1
 
-    if not has_openai and not has_anthropic and not has_openrouter:
+    if not has_openai and not has_anthropic and not has_openrouter and not has_gemini_cli:
         print(f"{Fore.RED}[!] No API keys found in .env file!{Style.RESET_ALL}")
         print(f"{Fore.YELLOW}[*] Please add OPENAI_API_KEY or ANTHROPIC_API_KEY to your .env file{Style.RESET_ALL}")
         sys.exit(1)

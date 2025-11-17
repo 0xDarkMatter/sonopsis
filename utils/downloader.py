@@ -86,12 +86,9 @@ class YouTubeDownloader:
         existing_files = list(self.output_dir.glob(f"YT_{video_id}_*.mp3"))
         if existing_files:
             print(f"\n{Fore.YELLOW}[!] Audio file already exists: {existing_files[0].name}{Style.RESET_ALL}")
-            response = input(f"{Fore.CYAN}Use downloaded source? (Y/N): {Style.RESET_ALL}").strip().upper()
-
-            if response == 'Y':
-                print(f"{Fore.GREEN}[+] Using existing audio file{Style.RESET_ALL}\n")
-                # Get metadata without downloading
-                return self._get_metadata_for_existing_file(url, existing_files[0])
+            print(f"{Fore.GREEN}[+] Using existing audio file (skip download){Style.RESET_ALL}\n")
+            # Get metadata without downloading
+            return self._get_metadata_for_existing_file(url, existing_files[0])
 
         # Configure download options with YT_{ID}_{Title} naming
         ydl_opts = {
@@ -99,12 +96,20 @@ class YouTubeDownloader:
             'outtmpl': str(self.output_dir / f'YT_{video_id}_%(title).180B.%(ext)s'),
             'quiet': True,
             'no_warnings': True,
+            'noprogress': True,  # Disable yt-dlp's native progress output (we use custom hook)
             'socket_timeout': 30,
             'retries': 3,
             'fragment_retries': 3,
             'restrictfilenames': True,  # Convert special chars to ASCII
             'windowsfilenames': True,  # Make filenames Windows-safe
             'progress_hooks': [self._progress_hook],  # Custom progress bar
+            # Anti-403 options
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android', 'web'],
+                    'player_skip': ['webpage', 'configs']
+                }
+            },
         }
 
         if audio_only:
