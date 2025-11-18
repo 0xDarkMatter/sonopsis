@@ -671,6 +671,16 @@ def select_summary_model():
         print(f"    {Fore.WHITE}{models[str(model_num)]['desc']}{Style.RESET_ALL}\n")
         model_num += 1
 
+        # Gemini 2.5 Flash Image CLI
+        models[str(model_num)] = {'name': 'gemini-2.5-flash-image', 'provider': 'Google',
+                                   'cost': '$0.00', 'speed': 'Fast', 'quality': 'Excellent',
+                                   'desc': '4K image model, generates logos, runs locally'}
+        print(f"{Fore.GREEN}[{model_num}]{Style.RESET_ALL} {Fore.WHITE}{Style.BRIGHT}GEMINI 2.5 FLASH IMAGE{Style.RESET_ALL} "
+              f"{Fore.CYAN}[LOCAL, 4K IMAGE]{Style.RESET_ALL}")
+        print(f"    {Fore.CYAN}Speed:{Style.RESET_ALL} Fast       {Fore.CYAN}Cost:{Style.RESET_ALL} FREE      {Fore.CYAN}Quality:{Style.RESET_ALL} Excellent")
+        print(f"    {Fore.WHITE}{models[str(model_num)]['desc']}{Style.RESET_ALL}\n")
+        model_num += 1
+
     # Check for OpenRouter API key (for Gemini and other models)
     has_openrouter = bool(os.getenv("OPENROUTER_API_KEY"))
 
