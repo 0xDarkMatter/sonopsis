@@ -263,22 +263,24 @@ class ContentSummarizer:
 
             time.sleep(0.5)
 
-    def _call_gemini_cli(self, system_prompt: str, user_prompt: str) -> str:
+    def _call_gemini_cli(self, analysis_template: str, transcript: str) -> str:
         """
         Call Gemini CLI in YOLO mode (non-interactive).
 
-        Uses the gemini CLI with @filename syntax to pass files.
-        Command format: gemini -y "@system_prompt_file" "@transcript_file"
+        Gemini CLI treats:
+        - First @file as the prompt/instructions
+        - Second @file as the input content
+
+        Command format: gemini -y "@prompt.md @input.md"
 
         Args:
-            system_prompt: System instructions
-            user_prompt: User prompt with transcript
+            analysis_template: Analysis instructions with metadata (no transcript)
+            transcript: Just the transcript content
 
         Returns:
             Generated summary text
         """
         import subprocess
-        import json
         import time
         from pathlib import Path
 
@@ -290,23 +292,29 @@ class ContentSummarizer:
         gemini_tmp = Path.home() / '.gemini' / 'tmp'
         gemini_tmp.mkdir(parents=True, exist_ok=True)
 
-        # Create temp files with unique names using timestamp
+        # Create temp files
         timestamp = int(time.time() * 1000)
-        system_file = gemini_tmp / f'system_prompt_{timestamp}.md'
-        user_file = gemini_tmp / f'user_prompt_{timestamp}.md'
+        analysis_file = gemini_tmp / f'analysis_{timestamp}.md'
+        transcript_file = gemini_tmp / f'transcript_{timestamp}.md'
 
         try:
-            # Write prompts to temp files
-            with open(system_file, 'w', encoding='utf-8') as f:
-                f.write(system_prompt)
+            # Write analysis template (prompt) and transcript (input) to separate files
+            with open(analysis_file, 'w', encoding='utf-8') as f:
+                f.write(analysis_template)
 
-            with open(user_file, 'w', encoding='utf-8') as f:
-                f.write(user_prompt)
+            with open(transcript_file, 'w', encoding='utf-8') as f:
+                f.write(transcript)
 
-            # Use Gemini CLI with @filename syntax
-            # Command: gemini -y "@system_prompt" "@user_prompt"
+            # Use Gemini CLI with @filename syntax as a single argument
+            # Command: gemini -y "@analysis.md @transcript.md"
+            # First file = prompt, Second file = input
+            file_refs = f'@{analysis_file} @{transcript_file}'
+
+            # Show what we're doing
+            print(f"{Fore.CYAN}    ├─ Calling Gemini CLI with YOLO mode{Style.RESET_ALL}")
+
             result = subprocess.run(
-                ['gemini', '-y', f'@{system_file}', f'@{user_file}'],
+                ['gemini', '-y', file_refs],
                 capture_output=True,
                 text=True,
                 timeout=600  # 10 minute timeout for long summaries
@@ -315,8 +323,11 @@ class ContentSummarizer:
             if result.returncode != 0:
                 raise Exception(f"Gemini CLI error: {result.stderr}")
 
-            # Return the output (Gemini CLI writes to stdout)
-            return result.stdout.strip()
+            # Show completion
+            output = result.stdout.strip()
+            print(f"{Fore.GREEN}    ├─ Gemini CLI completed successfully{Style.RESET_ALL}")
+
+            return output
 
         except subprocess.TimeoutExpired:
             raise Exception("Gemini CLI timed out after 10 minutes")
@@ -324,10 +335,10 @@ class ContentSummarizer:
         finally:
             # Clean up temp files
             try:
-                if system_file.exists():
-                    system_file.unlink()
-                if user_file.exists():
-                    user_file.unlink()
+                if analysis_file.exists():
+                    analysis_file.unlink()
+                if transcript_file.exists():
+                    transcript_file.unlink()
             except:
                 pass
 
@@ -459,9 +470,13 @@ class ContentSummarizer:
                         self._char_count = len(summary_content)
             elif self.api_type == 'gemini-cli':
                 # Gemini CLI in YOLO mode
+                # Gemini CLI uses separate files for prompt and input
+                # Create analysis template (with metadata, without transcript)
+                analysis_template = self._create_analysis_template(video_metadata, analysis_mode)
+
                 # Note: Gemini CLI doesn't support streaming, so we can't show real-time progress
                 # We'll just show elapsed time until completion
-                summary_content = self._call_gemini_cli(system_prompt, prompt)
+                summary_content = self._call_gemini_cli(analysis_template, transcript)
                 self._char_count = len(summary_content)
             else:
                 # OpenAI API (also used by OpenRouter with compatible interface)
@@ -802,6 +817,53 @@ Now create the comprehensive final summary following the standard format for {an
         mapping_prompt += "\n**Use this information to map SPEAKER_X labels to actual names in your summary.**\n"
 
         return mapping_prompt
+
+    def _create_analysis_template(self, metadata: Dict[str, any],
+                                 analysis_mode: str = "advanced") -> str:
+        """
+        Create the analysis template with metadata (NO transcript embedded).
+        Used for Gemini CLI where prompt and input are separate files.
+
+        Args:
+            metadata: Video metadata
+            analysis_mode: "basic" or "advanced"
+
+        Returns:
+            Analysis template string with metadata filled
+        """
+        # Determine prompt file path
+        prompt_file = Path(__file__).parent.parent / "docs" / f"analysis_{analysis_mode}.md"
+
+        if not prompt_file.exists():
+            raise FileNotFoundError(f"Analysis prompt file not found: {prompt_file}")
+
+        # Load prompt template from file
+        with open(prompt_file, 'r', encoding='utf-8') as f:
+            template = f.read()
+
+        # Extract video ID from URL
+        url = metadata.get('url', 'N/A')
+        video_id = self._extract_video_id(url) if url != 'N/A' else 'N/A'
+
+        # Replace metadata placeholders (but leave {transcript} placeholder for now)
+        # We'll remove it after since Gemini CLI gets transcript as separate file
+        template_with_metadata = template.format(
+            title=metadata.get('title', 'Unknown'),
+            uploader=metadata.get('uploader', 'Unknown'),
+            duration=self._format_duration(metadata.get('duration', 0)),
+            url=url,
+            video_id=video_id,
+            transcript="[TRANSCRIPT_WILL_BE_PROVIDED_AS_SEPARATE_FILE]"
+        )
+
+        # Remove the transcript placeholder line for Gemini CLI
+        # The analysis template will be file 1, transcript will be file 2
+        template_with_metadata = template_with_metadata.replace(
+            "[TRANSCRIPT_WILL_BE_PROVIDED_AS_SEPARATE_FILE]",
+            ""
+        )
+
+        return template_with_metadata.strip()
 
     def _create_summary_prompt(self, transcript: str, metadata: Dict[str, any],
                                analysis_mode: str = "advanced") -> str:
