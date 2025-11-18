@@ -32,6 +32,12 @@ Transform this transcript into a readable "book version" of the podcast - mainta
 
 ---
 
+**SPONSOR/ADVERTISEMENT FILTERING (IF REQUESTED):**
+
+{remove_ads_instruction}
+
+---
+
 **SPEAKER IDENTIFICATION PROTOCOL - CRITICAL**
 
 The transcript contains automatic speaker labels like **[SPEAKER_0]**, **[SPEAKER_1]**, **[SPEAKER_2]**, etc.
@@ -198,5 +204,15 @@ If the transcript includes timestamps (e.g., `[00:12:34]`), use them to create Y
 - Weave timestamps naturally into the narrative when discussing specific moments
 - This allows readers to jump directly to relevant sections while reading
 
+---
 
+**CRITICAL OUTPUT INSTRUCTION:**
+
+Write the complete narrative summary directly in your response. Do NOT:
+- Describe what you plan to do
+- Explain your process or methodology
+- Reference creating or saving files
+- Output meta-commentary about the task
+
+Simply output the final narrative summary in Markdown format, starting immediately with the opening summary paragraph.
 

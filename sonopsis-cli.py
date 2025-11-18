@@ -48,7 +48,8 @@ def print_info(message: str):
 def process_single_video(url: str, whisper_model: str = "base", gpt_model: str = "gpt-4o-mini",
                          analysis_mode: str = "basic", keep_files: bool = False,
                          transcription_engine: str = "whisper",
-                         video_num: int = None, total_videos: int = None):
+                         video_num: int = None, total_videos: int = None,
+                         prompt_file: str = None, remove_ads: bool = False):
     """
     Process a single YouTube video: download, transcribe, and summarize.
 
@@ -125,7 +126,9 @@ def process_single_video(url: str, whisper_model: str = "base", gpt_model: str =
             transcript_data['text'],
             metadata,
             analysis_mode,
-            transcription_engine=transcription_engine
+            transcription_engine=transcription_engine,
+            prompt_file=prompt_file,
+            remove_ads=remove_ads
         )
         print_success("Summary generated")
 
@@ -167,7 +170,8 @@ def process_single_video(url: str, whisper_model: str = "base", gpt_model: str =
 
 def process_playlist(url: str, whisper_model: str = "base", gpt_model: str = "gpt-4o-mini",
                      analysis_mode: str = "basic", keep_files: bool = False,
-                     transcription_engine: str = "whisper", start_from: int = 1):
+                     transcription_engine: str = "whisper", start_from: int = 1,
+                     prompt_file: str = None, remove_ads: bool = False):
     """
     Process all videos in a YouTube playlist.
 
@@ -230,7 +234,9 @@ def process_playlist(url: str, whisper_model: str = "base", gpt_model: str = "gp
                 keep_files,
                 transcription_engine,
                 video_num=idx,
-                total_videos=len(videos)
+                total_videos=len(videos),
+                prompt_file=prompt_file,
+                remove_ads=remove_ads
             )
 
             results.append(result)
@@ -286,15 +292,18 @@ def main():
         epilog="""
 Examples:
   # Single video
-  python main.py https://www.youtube.com/watch?v=dQw4w9WgXcQ
-  python main.py https://youtu.be/dQw4w9WgXcQ --whisper-model small
+  python sonopsis-cli.py https://www.youtube.com/watch?v=dQw4w9WgXcQ
+  python sonopsis-cli.py https://youtu.be/dQw4w9WgXcQ --whisper-model small
 
   # Playlist
-  python main.py "https://www.youtube.com/playlist?list=PLxxxxxxx"
-  python main.py <PLAYLIST_URL> --gpt-model claude-sonnet-4-5-20250929
+  python sonopsis-cli.py "https://www.youtube.com/playlist?list=PLxxxxxxx"
+  python sonopsis-cli.py <PLAYLIST_URL> --gpt-model claude-sonnet-4-5-20250929
 
   # Keep audio files
-  python main.py <URL> --keep-files
+  python sonopsis-cli.py <URL> --keep-files
+
+  # Use a custom prompt file
+  python sonopsis-cli.py <URL> --prompt-file /path/to/your/prompt.md
         """
     )
 
@@ -325,9 +334,9 @@ Examples:
 
     parser.add_argument(
         "--analysis-mode",
-        default="basic",
+        default="advanced",
         choices=["basic", "advanced"],
-        help="Analysis mode: basic (5 sections) or advanced (9 sections) (default: basic)"
+        help="Analysis mode: basic (5 sections) or advanced (9 sections) (default: advanced)"
     )
 
     parser.add_argument(
@@ -341,6 +350,18 @@ Examples:
         type=int,
         default=1,
         help="Start processing from video number (for playlists, default: 1)"
+    )
+
+    parser.add_argument(
+        "--prompt-file",
+        default=None,
+        help="Path to a custom prompt file for summarization."
+    )
+
+    parser.add_argument(
+        "--remove-ads",
+        action="store_true",
+        help="Remove sponsor/advertisement content from video description and summary"
     )
 
     args = parser.parse_args()
@@ -358,7 +379,9 @@ Examples:
             analysis_mode=args.analysis_mode,
             keep_files=args.keep_files,
             transcription_engine=args.transcription_engine,
-            start_from=args.start_from
+            start_from=args.start_from,
+            prompt_file=args.prompt_file,
+            remove_ads=args.remove_ads
         )
     else:
         print_header()
@@ -369,7 +392,9 @@ Examples:
             gpt_model=args.gpt_model,
             analysis_mode=args.analysis_mode,
             keep_files=args.keep_files,
-            transcription_engine=args.transcription_engine
+            transcription_engine=args.transcription_engine,
+            prompt_file=args.prompt_file,
+            remove_ads=args.remove_ads
         )
 
         if not result['success']:

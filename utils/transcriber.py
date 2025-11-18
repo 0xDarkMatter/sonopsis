@@ -228,8 +228,17 @@ class AudioTranscriber:
             sys.stdout.flush()
             print()  # Space below
 
-            # Get clean plain text transcript
-            plain_text = result['text'].strip()
+            # Format transcript with line breaks between segments
+            # This ensures better readability for both humans and LLMs like Gemini CLI
+            if result.get('segments'):
+                transcript_lines = []
+                for segment in result['segments']:
+                    text = segment.get('text', '').strip()
+                    if text:
+                        transcript_lines.append(text)
+                plain_text = '\n'.join(transcript_lines)
+            else:
+                plain_text = result['text'].strip()
 
             # Create markdown header with metadata
             markdown_content = f"""# Transcript
@@ -537,11 +546,15 @@ class AudioTranscriber:
 
                 plain_text = '\n'.join(transcript_lines)
             else:
-                # No SRT format, fall back to plain text
-                plain_text = response.text if hasattr(response, 'text') else ""
+                # No SRT format, fall back to plain text with line breaks at sentence boundaries
+                raw_text = response.text if hasattr(response, 'text') else ""
+                # Add line breaks after sentences (period + space) for better readability
+                plain_text = raw_text.replace('. ', '.\n') if raw_text else ""
         else:
-            # No additional_formats, use plain text
-            plain_text = response.text if hasattr(response, 'text') else ""
+            # No additional_formats, use plain text with line breaks at sentence boundaries
+            raw_text = response.text if hasattr(response, 'text') else ""
+            # Add line breaks after sentences (period + space) for better readability
+            plain_text = raw_text.replace('. ', '.\n') if raw_text else ""
 
         # Get language from response
         detected_language = response.language_code if hasattr(response, 'language_code') else "unknown"

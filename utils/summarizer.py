@@ -78,7 +78,8 @@ class ContentSummarizer:
             # Check if Gemini CLI is installed
             import subprocess
             try:
-                result = subprocess.run(['gemini', '--version'], capture_output=True, text=True, timeout=5)
+                # Gemini CLI can be slow to start (Node.js overhead) - use 60s timeout for version check
+                result = subprocess.run(['gemini', '--version'], capture_output=True, text=True, timeout=60)
                 if result.returncode != 0:
                     raise ValueError("Gemini CLI not found. Install: npm install -g @google/gemini-cli@latest")
 
@@ -88,7 +89,7 @@ class ContentSummarizer:
             except FileNotFoundError:
                 raise ValueError("Gemini CLI not installed. Install: npm install -g @google/gemini-cli@latest")
             except subprocess.TimeoutExpired:
-                raise ValueError("Gemini CLI is not responding")
+                raise ValueError("Gemini CLI is not responding (version check took > 60s)")
         elif model.startswith('openrouter/'):
             # OpenRouter uses OpenAI-compatible API
             self.api_type = 'openrouter'
@@ -270,8 +271,9 @@ class ContentSummarizer:
         Gemini CLI treats:
         - First @file as the prompt/instructions
         - Second @file as the input content
+        - Output is redirected to a file (to avoid token usage in shell)
 
-        Command format: gemini -y "@prompt.md @input.md"
+        Command format: gemini -y "@prompt.md @input.md" > output.md
 
         Args:
             analysis_template: Analysis instructions with metadata (no transcript)
@@ -282,20 +284,23 @@ class ContentSummarizer:
         """
         import subprocess
         import time
+        import os
         from pathlib import Path
 
         # Ensure Gemini CLI settings are configured
         self._ensure_gemini_settings()
 
-        # Gemini CLI requires files to be in workspace or its temp directory
-        # Use Gemini's temp directory: ~/.gemini/tmp/
-        gemini_tmp = Path.home() / '.gemini' / 'tmp'
+        # Gemini CLI requires files to be in workspace
+        # Use project .tmp directory
+        project_root = Path(__file__).parent.parent
+        gemini_tmp = project_root / '.tmp'
         gemini_tmp.mkdir(parents=True, exist_ok=True)
 
         # Create temp files
         timestamp = int(time.time() * 1000)
         analysis_file = gemini_tmp / f'analysis_{timestamp}.md'
         transcript_file = gemini_tmp / f'transcript_{timestamp}.md'
+        output_file = gemini_tmp / f'summary_{timestamp}.md'
 
         try:
             # Write analysis template (prompt) and transcript (input) to separate files
@@ -306,26 +311,78 @@ class ContentSummarizer:
                 f.write(transcript)
 
             # Use Gemini CLI with @filename syntax as a single argument
-            # Command: gemini -y "@analysis.md @transcript.md"
+            # Command: gemini -y "@analysis.md @transcript.md" > output.md
             # First file = prompt, Second file = input
             file_refs = f'@{analysis_file} @{transcript_file}'
 
             # Show what we're doing
             print(f"{Fore.CYAN}    ├─ Calling Gemini CLI with YOLO mode{Style.RESET_ALL}")
 
-            result = subprocess.run(
-                ['gemini', '-y', file_refs],
-                capture_output=True,
-                text=True,
-                timeout=600  # 10 minute timeout for long summaries
-            )
+            # Run Gemini CLI with output redirected to file
+            with open(output_file, 'w', encoding='utf-8') as out_f:
+                process = subprocess.Popen(
+                    ['gemini', '-y', file_refs],
+                    stdout=out_f,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
 
-            if result.returncode != 0:
-                raise Exception(f"Gemini CLI error: {result.stderr}")
+            # Monitor file modification time to track progress
+            start_time = time.time()
+            last_mtime = None
+            last_size = 0
+            stable_count = 0
 
-            # Show completion
-            output = result.stdout.strip()
-            print(f"{Fore.GREEN}    ├─ Gemini CLI completed successfully{Style.RESET_ALL}")
+            while process.poll() is None:  # While process is running
+                if output_file.exists():
+                    current_mtime = os.path.getmtime(output_file)
+                    current_size = os.path.getsize(output_file)
+
+                    # Show progress based on file size
+                    elapsed = int(time.time() - start_time)
+                    mins = elapsed // 60
+                    secs = elapsed % 60
+                    size_kb = current_size / 1024
+
+                    print(f"\r{Fore.CYAN}    ├─ Generating... {mins:02d}:{secs:02d} | {size_kb:.1f} KB generated{Style.RESET_ALL}", end='', flush=True)
+
+                    # Check if file has stopped being modified
+                    if last_mtime == current_mtime and current_size > 0:
+                        stable_count += 1
+                    else:
+                        stable_count = 0
+
+                    last_mtime = current_mtime
+                    last_size = current_size
+
+                time.sleep(0.5)  # Check every 500ms
+
+                # Timeout after 10 minutes
+                if time.time() - start_time > 600:
+                    process.kill()
+                    raise Exception("Gemini CLI timed out after 10 minutes")
+
+            # Process completed - print newline to clear progress line
+            print()
+
+            # Check if process succeeded
+            if process.returncode != 0:
+                stderr = process.stderr.read() if process.stderr else "Unknown error"
+                raise Exception(f"Gemini CLI error (exit code {process.returncode}): {stderr}")
+
+            # Read the output file
+            if not output_file.exists():
+                raise Exception("Gemini CLI completed but output file not found")
+
+            with open(output_file, 'r', encoding='utf-8') as f:
+                output = f.read().strip()
+
+            if not output:
+                raise Exception("Gemini CLI completed but output file is empty")
+
+            # Show completion with final size
+            final_size_kb = len(output) / 1024
+            print(f"{Fore.GREEN}    ├─ Gemini CLI completed: {final_size_kb:.1f} KB generated{Style.RESET_ALL}")
 
             return output
 
@@ -339,6 +396,8 @@ class ContentSummarizer:
                     analysis_file.unlink()
                 if transcript_file.exists():
                     transcript_file.unlink()
+                if output_file.exists():
+                    output_file.unlink()
             except:
                 pass
 
@@ -381,7 +440,8 @@ class ContentSummarizer:
 
 
     def summarize(self, transcript: str, video_metadata: Dict[str, any],
-                  analysis_mode: str = "advanced", transcription_engine: str = "whisper") -> Dict[str, str]:
+                  analysis_mode: str = "advanced", transcription_engine: str = "whisper",
+                  prompt_file: Optional[str] = None, remove_ads: bool = False) -> Dict[str, str]:
         """
         Generate a comprehensive summary and notes from a transcript.
         Automatically uses chunking for long transcripts.
@@ -415,13 +475,13 @@ class ContentSummarizer:
         if total_input_tokens > self.max_input_tokens:
             print(f"    ├─ Total input ({total_input_tokens:,} tokens) exceeds safe limit ({self.max_input_tokens:,})")
             print(f"    ├─ Using chunked summarization (chunk size: {self.chunk_target_tokens:,} tokens)")
-            return self._summarize_chunked(transcript, video_metadata, analysis_mode)
+            return self._summarize_chunked(transcript, video_metadata, analysis_mode, prompt_file=prompt_file, remove_ads=remove_ads)
         else:
             utilization = (total_input_tokens / self.max_input_tokens) * 100
             print(f"    ├─ Total input: {total_input_tokens:,} tokens ({utilization:.1f}% of limit)")
-            return self._summarize_single(transcript, video_metadata, analysis_mode)
+            return self._summarize_single(transcript, video_metadata, analysis_mode, prompt_file=prompt_file, remove_ads=remove_ads)
 
-    def _summarize_single(self, transcript: str, video_metadata: Dict[str, any], analysis_mode: str) -> Dict[str, str]:
+    def _summarize_single(self, transcript: str, video_metadata: Dict[str, any], analysis_mode: str, prompt_file: Optional[str] = None, remove_ads: bool = False) -> Dict[str, str]:
         """
         Generate summary from a single transcript (no chunking needed).
 
@@ -429,6 +489,7 @@ class ContentSummarizer:
             transcript: Video transcript text
             video_metadata: Dictionary containing video information
             analysis_mode: "basic" or "advanced"
+            remove_ads: Whether to exclude sponsor/ad content
 
         Returns:
             Dictionary containing summary, key points, and notes
@@ -437,7 +498,7 @@ class ContentSummarizer:
         system_prompt = self._load_system_prompt()
 
         # Create the prompt
-        prompt = self._create_summary_prompt(transcript, video_metadata, analysis_mode)
+        prompt = self._create_summary_prompt(transcript, video_metadata, analysis_mode, prompt_file=prompt_file, remove_ads=remove_ads)
 
         try:
             # Start progress indicator
@@ -472,7 +533,7 @@ class ContentSummarizer:
                 # Gemini CLI in YOLO mode
                 # Gemini CLI uses separate files for prompt and input
                 # Create analysis template (with metadata, without transcript)
-                analysis_template = self._create_analysis_template(video_metadata, analysis_mode)
+                analysis_template = self._create_analysis_template(video_metadata, analysis_mode, prompt_file=prompt_file)
 
                 # Note: Gemini CLI doesn't support streaming, so we can't show real-time progress
                 # We'll just show elapsed time until completion
@@ -547,7 +608,7 @@ class ContentSummarizer:
         except Exception as e:
             raise Exception(f"Summarization failed: {str(e)}")
 
-    def _summarize_chunked(self, transcript: str, video_metadata: Dict[str, any], analysis_mode: str) -> Dict[str, str]:
+    def _summarize_chunked(self, transcript: str, video_metadata: Dict[str, any], analysis_mode: str, prompt_file: Optional[str] = None, remove_ads: bool = False) -> Dict[str, str]:
         """
         Generate summary using map-reduce strategy for long transcripts.
 
@@ -559,6 +620,7 @@ class ContentSummarizer:
             transcript: Video transcript text
             video_metadata: Dictionary containing video information
             analysis_mode: "basic" or "advanced"
+            remove_ads: Whether to exclude sponsor/ad content
 
         Returns:
             Dictionary containing summary, key points, and notes
@@ -630,7 +692,7 @@ class ContentSummarizer:
             # Step 3: REDUCE - Combine chunk summaries into final summary
             print(f"    ├─ Combining {num_chunks} chunk summaries into final summary")
 
-            combined_prompt = self._create_reduce_summary_prompt(chunk_summaries, video_metadata, analysis_mode)
+            combined_prompt = self._create_reduce_summary_prompt(chunk_summaries, video_metadata, analysis_mode, prompt_file=prompt_file, remove_ads=remove_ads)
             system_prompt = self._load_system_prompt()
 
             # Start progress indicator for final summary
@@ -720,14 +782,53 @@ TRANSCRIPT SEGMENT:
 {chunk_text}
 """
 
-    def _create_reduce_summary_prompt(self, chunk_summaries: List[str], metadata: Dict, analysis_mode: str) -> str:
+    def _create_reduce_summary_prompt(self, chunk_summaries: List[str], metadata: Dict, analysis_mode: str, prompt_file: Optional[str] = None, remove_ads: bool = False) -> str:
         """Create prompt for combining chunk summaries into final summary."""
         combined_summaries = "\n\n---\n\n".join([f"SEGMENT {i+1} SUMMARY:\n{summary}" for i, summary in enumerate(chunk_summaries)])
+
+        # Create sponsor/ad removal instruction if requested
+        if remove_ads:
+            remove_ads_instruction = """**CRITICAL - EXCLUDE ALL SPONSOR/ADVERTISEMENT CONTENT:**
+
+When analyzing this content, you MUST completely exclude:
+- Video sponsors (e.g., Suno, The Economist, NordVPN, etc.)
+- Advertisement segments or sponsor messages
+- Calls to action for sponsor products/services
+- Links or references to sponsored content
+- "This video is sponsored by..." type statements
+
+Focus ONLY on the substantive content of the discussion. Treat sponsor segments as if they were never spoken."""
+        else:
+            remove_ads_instruction = "No special filtering requested. Include all content from the transcript."
+
+        if prompt_file:
+            prompt_path = Path(prompt_file)
+            if not prompt_path.exists():
+                raise FileNotFoundError(f"Analysis prompt file not found: {prompt_path}")
+
+            with open(prompt_path, 'r', encoding='utf-8') as f:
+                template = f.read()
+
+            # Replace placeholders
+            url = metadata.get('url', 'N/A')
+            video_id = self._extract_video_id(url) if url != 'N/A' else 'N/A'
+            prompt = template.format(
+                title=metadata.get('title', 'Unknown'),
+                uploader=metadata.get('uploader', 'Unknown'),
+                duration=self._format_duration(metadata.get('duration', 0)),
+                url=url,
+                video_id=video_id,
+                transcript=combined_summaries,
+                remove_ads_instruction=remove_ads_instruction
+            )
+            return prompt
+
+        ads_note = f"\n\n{remove_ads_instruction}\n" if remove_ads else ""
 
         return f"""I have provided summaries of {len(chunk_summaries)} segments from a video titled: "{metadata.get('title', 'Unknown')}"
 
 Please create a comprehensive, well-structured final summary by combining these segment summaries.
-
+{ads_note}
 Your task:
 1. Synthesize all segment summaries into a cohesive narrative
 2. Identify overarching themes and key topics
@@ -819,7 +920,8 @@ Now create the comprehensive final summary following the standard format for {an
         return mapping_prompt
 
     def _create_analysis_template(self, metadata: Dict[str, any],
-                                 analysis_mode: str = "advanced") -> str:
+                                 analysis_mode: str = "advanced", prompt_file: Optional[str] = None,
+                                 remove_ads: bool = False) -> str:
         """
         Create the analysis template with metadata (NO transcript embedded).
         Used for Gemini CLI where prompt and input are separate files.
@@ -827,23 +929,43 @@ Now create the comprehensive final summary following the standard format for {an
         Args:
             metadata: Video metadata
             analysis_mode: "basic" or "advanced"
+            prompt_file: Optional custom prompt file path
+            remove_ads: Whether to exclude sponsor/ad content
 
         Returns:
             Analysis template string with metadata filled
         """
         # Determine prompt file path
-        prompt_file = Path(__file__).parent.parent / "docs" / f"analysis_{analysis_mode}.md"
+        if prompt_file:
+            prompt_path = Path(prompt_file)
+        else:
+            prompt_path = Path(__file__).parent.parent / "docs" / f"analysis_{analysis_mode}.md"
 
-        if not prompt_file.exists():
-            raise FileNotFoundError(f"Analysis prompt file not found: {prompt_file}")
+        if not prompt_path.exists():
+            raise FileNotFoundError(f"Analysis prompt file not found: {prompt_path}")
 
         # Load prompt template from file
-        with open(prompt_file, 'r', encoding='utf-8') as f:
+        with open(prompt_path, 'r', encoding='utf-8') as f:
             template = f.read()
 
         # Extract video ID from URL
         url = metadata.get('url', 'N/A')
         video_id = self._extract_video_id(url) if url != 'N/A' else 'N/A'
+
+        # Create sponsor/ad removal instruction if requested
+        if remove_ads:
+            remove_ads_instruction = """**CRITICAL - EXCLUDE ALL SPONSOR/ADVERTISEMENT CONTENT:**
+
+When analyzing this content, you MUST completely exclude:
+- Video sponsors (e.g., Suno, The Economist, NordVPN, etc.)
+- Advertisement segments or sponsor messages
+- Calls to action for sponsor products/services
+- Links or references to sponsored content
+- "This video is sponsored by..." type statements
+
+Focus ONLY on the substantive content of the discussion. Treat sponsor segments as if they were never spoken."""
+        else:
+            remove_ads_instruction = "No special filtering requested. Include all content from the transcript."
 
         # Replace metadata placeholders (but leave {transcript} placeholder for now)
         # We'll remove it after since Gemini CLI gets transcript as separate file
@@ -853,7 +975,8 @@ Now create the comprehensive final summary following the standard format for {an
             duration=self._format_duration(metadata.get('duration', 0)),
             url=url,
             video_id=video_id,
-            transcript="[TRANSCRIPT_WILL_BE_PROVIDED_AS_SEPARATE_FILE]"
+            transcript="[TRANSCRIPT_WILL_BE_PROVIDED_AS_SEPARATE_FILE]",
+            remove_ads_instruction=remove_ads_instruction
         )
 
         # Remove the transcript placeholder line for Gemini CLI
@@ -866,7 +989,7 @@ Now create the comprehensive final summary following the standard format for {an
         return template_with_metadata.strip()
 
     def _create_summary_prompt(self, transcript: str, metadata: Dict[str, any],
-                               analysis_mode: str = "advanced") -> str:
+                               analysis_mode: str = "advanced", prompt_file: Optional[str] = None, remove_ads: bool = False) -> str:
         """
         Create the prompt for GPT by loading from external file.
 
@@ -874,18 +997,22 @@ Now create the comprehensive final summary following the standard format for {an
             transcript: Transcript text
             metadata: Video metadata
             analysis_mode: "basic" or "advanced"
+            remove_ads: Whether to exclude sponsor/ad content
 
         Returns:
             Formatted prompt string
         """
         # Determine prompt file path
-        prompt_file = Path(__file__).parent.parent / "docs" / f"analysis_{analysis_mode}.md"
+        if prompt_file:
+            prompt_path = Path(prompt_file)
+        else:
+            prompt_path = Path(__file__).parent.parent / "docs" / f"analysis_{analysis_mode}.md"
 
-        if not prompt_file.exists():
-            raise FileNotFoundError(f"Analysis prompt file not found: {prompt_file}")
+        if not prompt_path.exists():
+            raise FileNotFoundError(f"Analysis prompt file not found: {prompt_path}")
 
         # Load prompt template from file
-        with open(prompt_file, 'r', encoding='utf-8') as f:
+        with open(prompt_path, 'r', encoding='utf-8') as f:
             template = f.read()
 
         # Extract video ID from URL
@@ -895,6 +1022,21 @@ Now create the comprehensive final summary following the standard format for {an
         # Generate speaker mapping assistance
         speaker_mapping = self._identify_speakers(transcript, metadata)
 
+        # Create sponsor/ad removal instruction if requested
+        if remove_ads:
+            remove_ads_instruction = """**CRITICAL - EXCLUDE ALL SPONSOR/ADVERTISEMENT CONTENT:**
+
+When analyzing this content, you MUST completely exclude:
+- Video sponsors (e.g., Suno, The Economist, NordVPN, etc.)
+- Advertisement segments or sponsor messages
+- Calls to action for sponsor products/services
+- Links or references to sponsored content
+- "This video is sponsored by..." type statements
+
+Focus ONLY on the substantive content of the discussion. Treat sponsor segments as if they were never spoken."""
+        else:
+            remove_ads_instruction = "No special filtering requested. Include all content from the transcript."
+
         # Replace placeholders
         prompt = template.format(
             title=metadata.get('title', 'Unknown'),
@@ -902,7 +1044,8 @@ Now create the comprehensive final summary following the standard format for {an
             duration=self._format_duration(metadata.get('duration', 0)),
             url=url,
             video_id=video_id,
-            transcript=transcript
+            transcript=transcript,
+            remove_ads_instruction=remove_ads_instruction
         )
 
         # Append speaker mapping guidance
