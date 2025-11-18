@@ -80,9 +80,13 @@ class ContentSummarizer:
             try:
                 result = subprocess.run(['gemini', '--version'], capture_output=True, text=True, timeout=5)
                 if result.returncode != 0:
-                    raise ValueError("Gemini CLI not found. Install: npm install -g @google/generative-ai-cli")
+                    raise ValueError("Gemini CLI not found. Install: npm install -g @google/gemini-cli@latest")
+
+                # Ensure settings are configured
+                self._ensure_gemini_settings()
+
             except FileNotFoundError:
-                raise ValueError("Gemini CLI not installed. Install: npm install -g @google/generative-ai-cli")
+                raise ValueError("Gemini CLI not installed. Install: npm install -g @google/gemini-cli@latest")
             except subprocess.TimeoutExpired:
                 raise ValueError("Gemini CLI is not responding")
         elif model.startswith('openrouter/'):
@@ -263,8 +267,8 @@ class ContentSummarizer:
         """
         Call Gemini CLI in YOLO mode (non-interactive).
 
-        Uses the gemini CLI tool with YOLO mode (-y) to auto-approve any tool usage.
-        Writes prompt to stdin using subprocess.PIPE
+        Uses the gemini CLI with @filename syntax to pass files.
+        Command format: gemini -y "@system_prompt_file" "@transcript_file"
 
         Args:
             system_prompt: System instructions
@@ -274,41 +278,96 @@ class ContentSummarizer:
             Generated summary text
         """
         import subprocess
+        import json
+        import time
+        from pathlib import Path
 
-        # Combine prompts
-        full_prompt = f"{system_prompt}\n\n{user_prompt}"
+        # Ensure Gemini CLI settings are configured
+        self._ensure_gemini_settings()
+
+        # Gemini CLI requires files to be in workspace or its temp directory
+        # Use Gemini's temp directory: ~/.gemini/tmp/
+        gemini_tmp = Path.home() / '.gemini' / 'tmp'
+        gemini_tmp.mkdir(parents=True, exist_ok=True)
+
+        # Create temp files with unique names using timestamp
+        timestamp = int(time.time() * 1000)
+        system_file = gemini_tmp / f'system_prompt_{timestamp}.md'
+        user_file = gemini_tmp / f'user_prompt_{timestamp}.md'
 
         try:
-            # Use Popen to write to stdin directly
-            process = subprocess.Popen(
-                ['gemini', '-m', self.model, '-o', 'text', '-y'],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
+            # Write prompts to temp files
+            with open(system_file, 'w', encoding='utf-8') as f:
+                f.write(system_prompt)
+
+            with open(user_file, 'w', encoding='utf-8') as f:
+                f.write(user_prompt)
+
+            # Use Gemini CLI with @filename syntax
+            # Command: gemini -y "@system_prompt" "@user_prompt"
+            result = subprocess.run(
+                ['gemini', '-y', f'@{system_file}', f'@{user_file}'],
+                capture_output=True,
+                text=True,
+                timeout=600  # 10 minute timeout for long summaries
             )
 
-            # Write the prompt to stdin and close it
-            stdout, stderr = process.communicate(input=full_prompt, timeout=600)
+            if result.returncode != 0:
+                raise Exception(f"Gemini CLI error: {result.stderr}")
 
-            if process.returncode != 0:
-                raise Exception(f"Gemini CLI error: {stderr}")
-
-            # Clean up the output - remove YOLO mode message and cached credentials message
-            lines = stdout.strip().split('\n')
-
-            # Skip common Gemini CLI status messages
-            cleaned_lines = []
-            for line in lines:
-                if 'YOLO mode is enabled' in line or 'Loaded cached credentials' in line:
-                    continue
-                cleaned_lines.append(line)
-
-            return '\n'.join(cleaned_lines).strip()
+            # Return the output (Gemini CLI writes to stdout)
+            return result.stdout.strip()
 
         except subprocess.TimeoutExpired:
-            process.kill()
             raise Exception("Gemini CLI timed out after 10 minutes")
+
+        finally:
+            # Clean up temp files
+            try:
+                if system_file.exists():
+                    system_file.unlink()
+                if user_file.exists():
+                    user_file.unlink()
+            except:
+                pass
+
+    def _ensure_gemini_settings(self):
+        """
+        Ensure Gemini CLI settings are configured correctly.
+
+        Creates or updates ~/.gemini/settings.json with required settings:
+        - fileFiltering.respectGitIgnore: false (allows reading from any directory)
+        """
+        import json
+        from pathlib import Path
+
+        # Gemini settings location
+        gemini_dir = Path.home() / '.gemini'
+        settings_file = gemini_dir / 'settings.json'
+
+        # Ensure directory exists
+        gemini_dir.mkdir(exist_ok=True)
+
+        # Read existing settings or create new
+        if settings_file.exists():
+            with open(settings_file, 'r', encoding='utf-8') as f:
+                try:
+                    settings = json.load(f)
+                except json.JSONDecodeError:
+                    settings = {}
+        else:
+            settings = {}
+
+        # Ensure required settings
+        if 'fileFiltering' not in settings:
+            settings['fileFiltering'] = {}
+
+        settings['fileFiltering']['respectGitIgnore'] = False
+
+        # Write settings back
+        with open(settings_file, 'w', encoding='utf-8') as f:
+            json.dump(settings, f, indent=2)
+
 
     def summarize(self, transcript: str, video_metadata: Dict[str, any],
                   analysis_mode: str = "advanced", transcription_engine: str = "whisper") -> Dict[str, str]:
