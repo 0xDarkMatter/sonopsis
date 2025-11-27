@@ -113,9 +113,7 @@ Sonopsis/
 │   ├── compare_models.py    # Compare AI model outputs
 │   └── process_existing.py  # Process existing transcripts
 ├── docs/                    # Documentation
-│   ├── QUICKSTART.md        # Quick start guide
 │   ├── PLAN.md              # Future enhancements
-│   ├── STORAGE.md           # Storage info
 │   ├── analysis_basic.md    # Basic analysis prompt
 │   ├── analysis_advanced.md # Advanced analysis prompt
 │   └── system_prompt.md     # AI system prompt
