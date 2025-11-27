@@ -18,7 +18,7 @@ from utils.summarizer import ContentSummarizer
 init(autoreset=True)
 
 # Load environment variables
-load_dotenv()
+load_dotenv(override=True)
 
 # Check for OpenAI API key
 if not os.getenv("OPENAI_API_KEY"):

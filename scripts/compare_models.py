@@ -17,7 +17,7 @@ from utils.summarizer import ContentSummarizer
 
 # Initialize
 init(autoreset=True)
-load_dotenv()
+load_dotenv(override=True)
 
 # Configuration - Change this to the video you want to test
 TRANSCRIPT_FILE = "transcripts/Brian Cox： The incomprehensible scales that rule the Universe_transcript.txt"

@@ -26,7 +26,7 @@ from utils.summarizer import ContentSummarizer
 init(autoreset=True)
 
 # Load environment variables
-load_dotenv()
+load_dotenv(override=True)  # .env takes precedence over system env vars
 
 
 def print_banner():

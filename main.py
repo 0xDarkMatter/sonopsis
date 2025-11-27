@@ -269,8 +269,8 @@ def process_playlist(url: str, whisper_model: str = "base", gpt_model: str = "gp
 
 def main():
     """Main entry point."""
-    # Load environment variables
-    load_dotenv()
+    # Load environment variables (.env takes precedence over system env vars)
+    load_dotenv(override=True)
 
     # Check for API keys
     if not os.getenv("OPENAI_API_KEY") and not os.getenv("ANTHROPIC_API_KEY"):
