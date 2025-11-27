@@ -403,9 +403,9 @@ Use a smaller model: `--whisper-model tiny` or `--whisper-model base`
 ### Using as a Library
 
 ```python
-from downloader import YouTubeDownloader
-from transcriber import AudioTranscriber
-from summarizer import ContentSummarizer
+from utils.downloader import YouTubeDownloader
+from utils.transcriber import AudioTranscriber
+from utils.summarizer import ContentSummarizer
 
 # Download video
 downloader = YouTubeDownloader()
@@ -422,7 +422,7 @@ summary = summarizer.summarize(transcript['text'], video_data)
 
 ## License
 
-This project is provided as-is for educational and personal use.
+MIT License - see [LICENSE](LICENSE) for details.
 
 ## Contributing
 

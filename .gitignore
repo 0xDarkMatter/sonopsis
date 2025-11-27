@@ -49,6 +49,16 @@ summaries/
 # Claude Code
 .claude/
 
+# Development files (not needed for public release)
+CODE_REVIEW.md
+IMPROVEMENT_PLAN.md
+PYTHON_DOWNGRADE_GUIDE.md
+UPDATE.md
+DIARIZATION_PLAN.md
+test_*.py
+*_backup.*
+.quibbler/
+
 # OS
 .DS_Store
 Thumbs.db

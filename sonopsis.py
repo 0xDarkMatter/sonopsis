@@ -496,7 +496,8 @@ def select_whisper_model():
         print(f"    {Fore.WHITE}{info['desc']}{Style.RESET_ALL}\n")
 
     # Check cache for already downloaded models
-    cache_dir = Path(os.getenv("WHISPER_CACHE_DIR", "E:/Coding/WhisperCache"))
+    default_cache = Path.home() / ".cache" / "whisper"
+    cache_dir = Path(os.getenv("WHISPER_CACHE_DIR", str(default_cache)))
     if cache_dir.exists():
         downloaded = [f.stem for f in cache_dir.glob('*.pt')]
         if downloaded:

@@ -16,12 +16,7 @@ ANTHROPIC_API_KEY=your-key-here
 
 ### 3. Run!
 ```bash
-python ytp.py
-```
-
-**Or on Windows, just type:**
-```bash
-ytp
+python sonopsis.py
 ```
 
 That's it! The interactive interface will guide you through everything else.
@@ -32,9 +27,7 @@ That's it! The interactive interface will guide you through everything else.
 
 ### **Easiest: Interactive Mode**
 ```bash
-python ytp.py          # Full interactive experience
-ytp                    # Windows shortcut
-./ytp.sh               # Linux/Mac shortcut
+python sonopsis.py     # Full interactive experience
 ```
 
 ### **Quick: Command Line**
@@ -51,7 +44,7 @@ python scripts/compare_models.py
 
 ## First Time? Try This:
 
-1. Run `python ytp.py`
+1. Run `python sonopsis.py`
 2. Paste any YouTube URL or Playlist URL
 3. Select **[2] BASE** Whisper model (recommended, fast)
 4. Select **[4] CLAUDE HAIKU 4.5** [BEST VALUE] for summary
@@ -69,7 +62,7 @@ python scripts/compare_models.py
 
 - **Transcripts:** `transcripts/` folder
 - **Summaries:** `summaries/` folder
-- **Whisper Models:** `E:\Coding\WhisperCache\` (not C: drive!)
+- **Whisper Models:** `~/.cache/whisper/` (configurable via WHISPER_CACHE_DIR)
 
 ---
 
@@ -117,7 +110,5 @@ brew install ffmpeg     # Mac
 
 **Ready to start? Just run:**
 ```bash
-python ytp.py
+python sonopsis.py
 ```
-
-🎉 Enjoy!

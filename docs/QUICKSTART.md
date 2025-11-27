@@ -19,16 +19,12 @@ ANTHROPIC_API_KEY=sk-ant-your-key-here
 ### 1. Quick Launch (Easiest!)
 
 ```bash
-python ytp.py
+python sonopsis.py
 ```
-
-**Or simply:**
-- Windows: `ytp`
-- Linux/Mac: `./ytp.sh`
 
 ### 2. Interactive Mode (Recommended for Beginners)
 
-Same as above - `ytp` launches the interactive interface with:
+The interactive interface provides:
 - Beautiful colored menus
 - Visual tags ([RECOMMENDED], [BEST VALUE], etc.)
 - Cache status indicators
@@ -90,26 +86,26 @@ python main.py <URL> --keep-files
 
 ### For Speed (< 20 seconds for 15min video)
 ```bash
-python interactive.py
+python sonopsis.py
 # Select: gpt-4o-mini + tiny/base whisper
 ```
 
 ### For Quality (Best summaries)
 ```bash
-python interactive.py
+python sonopsis.py
 # Select: Claude Sonnet 4.5 + small whisper
 ```
 
 ### For Value (Best quality/cost ratio)
 ```bash
-python interactive.py
+python sonopsis.py
 # Select: Claude Haiku 4.5 + base whisper
 ```
 
 ### For Error Correction (Catches transcript mistakes)
 ```bash
-python interactive.py
-# Select: GPT-5 + medium whisper
+python sonopsis.py
+# Select: GPT-5.1 + medium whisper
 ```
 
 ---
@@ -190,4 +186,3 @@ python main.py <URL> --whisper-model tiny
 
 - See full documentation: `README.md`
 - Storage information: `docs/STORAGE.md`
-- Report issues: https://github.com/anthropics/claude-code/issues

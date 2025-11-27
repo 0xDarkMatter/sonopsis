@@ -41,9 +41,10 @@ class AudioTranscriber:
         self.hf_token = hf_token or os.getenv("HF_TOKEN")
         self.elevenlabs_api_key = elevenlabs_api_key or os.getenv("ELEVENLABS_API_KEY")
 
-        # Use custom Whisper cache location on E: drive
-        # This allows sharing models across all projects without using C: drive space
-        whisper_cache = os.getenv("WHISPER_CACHE_DIR", "E:/Coding/WhisperCache")
+        # Use custom Whisper cache location (defaults to ~/.cache/whisper)
+        # Set WHISPER_CACHE_DIR to customize location
+        default_cache = os.path.join(os.path.expanduser("~"), ".cache", "whisper")
+        whisper_cache = os.getenv("WHISPER_CACHE_DIR", default_cache)
         os.makedirs(whisper_cache, exist_ok=True)
 
         if use_elevenlabs:
