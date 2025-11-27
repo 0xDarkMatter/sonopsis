@@ -100,18 +100,27 @@ HF_TOKEN=your_huggingface_token_here
 
 ```
 Sonopsis/
-├── sonopsis.py          # Interactive menu interface (recommended)
-├── main.py              # Command-line interface
-├── utils/               # Core modules (downloader, transcriber, summarizer)
-├── scripts/             # Testing and comparison scripts
-├── docs/                # Documentation and analysis prompts
-│   ├── analysis_basic.md      # Basic analysis prompt template
-│   ├── analysis_advanced.md   # Advanced analysis prompt template
-│   ├── QUICKSTART.md          # Quick start guide
-│   └── STORAGE.md             # Storage locations info
-├── downloads/           # Temporary audio files
-├── transcripts/         # Generated markdown transcripts
-└── summaries/           # AI summaries
+├── sonopsis.py              # Interactive menu interface (recommended)
+├── main.py                  # Command-line interface
+├── requirements.txt         # Python dependencies
+├── .env.example             # API key template
+├── LICENSE                  # MIT license
+├── utils/                   # Core modules
+│   ├── downloader.py        # YouTube video/audio download
+│   ├── transcriber.py       # Whisper/WhisperX/ElevenLabs transcription
+│   └── summarizer.py        # GPT/Claude/OpenRouter summarization
+├── scripts/                 # Utility scripts
+│   ├── compare_models.py    # Compare AI model outputs
+│   └── process_existing.py  # Process existing transcripts
+├── docs/                    # Documentation
+│   ├── analysis_basic.md    # Basic analysis prompt
+│   ├── analysis_advanced.md # Advanced analysis prompt
+│   ├── system_prompt.md     # AI system prompt
+│   ├── QUICKSTART.md        # Quick start guide
+│   └── STORAGE.md           # Storage info
+├── downloads/               # Temporary audio files (auto-cleaned)
+├── transcripts/             # Generated transcripts
+└── summaries/               # AI-generated summaries
 ```
 
 ## Usage
