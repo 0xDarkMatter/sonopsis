@@ -1,0 +1,38 @@
+# Sonopsis Configuration
+# Non-secret settings. API keys go in .env
+
+# Default models (can be overridden via CLI)
+defaults:
+  # Summarization model: gpt-4o-mini, gpt-4o, gpt-5.1, claude-haiku-4-5-20251001, claude-sonnet-4-5-20250929
+  summary_model: claude-sonnet-4-5-20250929
+
+  # Whisper model: tiny, base, small, medium, large
+  whisper_model: base
+
+  # Transcription engine: whisper, whisperx, elevenlabs
+  transcription_engine: whisper
+
+  # Analysis mode: basic, advanced
+  analysis_mode: basic
+
+# Output directories (relative to project root)
+paths:
+  downloads: downloads
+  transcripts: transcripts
+  summaries: summaries
+
+# Whisper settings
+whisper:
+  # Cache directory for downloaded models (default: ~/.cache/whisper)
+  # cache_dir: ~/.cache/whisper
+
+  # Device: cpu, cuda, auto
+  device: auto
+
+# Processing options
+processing:
+  # Keep downloaded audio files after processing
+  keep_files: false
+
+  # Clean up partial downloads on startup
+  cleanup_partials: true

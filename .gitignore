@@ -1,7 +1,17 @@
-# Environment variables
-.env
+# =============================================================================
+# Sonopsis .gitignore
+# =============================================================================
 
+# -----------------------------------------------------------------------------
+# Secrets & Environment
+# -----------------------------------------------------------------------------
+.env
+.env.local
+.env.*.local
+
+# -----------------------------------------------------------------------------
 # Python
+# -----------------------------------------------------------------------------
 __pycache__/
 *.py[cod]
 *$py.class
@@ -9,11 +19,11 @@ __pycache__/
 .Python
 env/
 venv/
+.venv/
 ENV/
 build/
 develop-eggs/
 dist/
-downloads/
 eggs/
 .eggs/
 lib/
@@ -25,40 +35,90 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
-# Downloaded videos and audio
+# -----------------------------------------------------------------------------
+# Output Directories (user-generated content)
+# -----------------------------------------------------------------------------
 downloads/
+transcripts/
+summaries/
+outputs/
+
+# -----------------------------------------------------------------------------
+# Media Files (if any escape to root)
+# -----------------------------------------------------------------------------
 *.mp4
 *.webm
 *.mp3
 *.wav
 *.m4a
+*.mkv
+*.avi
+*.part
+*.ytdl
 
-# Transcripts and summaries
-outputs/
-transcripts/
-summaries/
+# -----------------------------------------------------------------------------
+# Whisper & ML Model Caches
+# -----------------------------------------------------------------------------
+.cache/
+*.pt
+*.bin
 
-# IDEs
+# -----------------------------------------------------------------------------
+# IDE & Editors
+# -----------------------------------------------------------------------------
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
+*.sublime-*
 
-# Claude Code
-.claude/
+# -----------------------------------------------------------------------------
+# OS Files
+# -----------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
 
-# Development files (not needed for public release)
+# -----------------------------------------------------------------------------
+# Claude Code Session State
+# -----------------------------------------------------------------------------
+# Keep .claude/ directory but ignore transient files
+.claude/session-cache.json
+.claude/claude-state.json
+.claude/claude-progress.md
+.claude/settings.local.json
+
+# -----------------------------------------------------------------------------
+# Development & Testing Artifacts
+# -----------------------------------------------------------------------------
+.quibbler/
+test_*.py
+*_backup.*
+*.log
+*.tmp
+nul
+
+# -----------------------------------------------------------------------------
+# Documentation artifacts (dev-only, not for release)
+# -----------------------------------------------------------------------------
 CODE_REVIEW.md
 IMPROVEMENT_PLAN.md
 PYTHON_DOWNGRADE_GUIDE.md
 UPDATE.md
 DIARIZATION_PLAN.md
-test_*.py
-*_backup.*
-.quibbler/
 
-# OS
-.DS_Store
-Thumbs.db
+# -----------------------------------------------------------------------------
+# Images directory (keep structure, ignore large files)
+# -----------------------------------------------------------------------------
+images/*.png
+images/*.jpg
+images/*.jpeg
+images/*.gif

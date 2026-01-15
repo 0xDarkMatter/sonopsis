@@ -181,7 +181,7 @@ class ContentSummarizer:
         Returns:
             System prompt string
         """
-        system_prompt_file = Path(__file__).parent.parent / "docs" / "system_prompt.md"
+        system_prompt_file = Path(__file__).parent.parent / "prose" / "prompts" / "system.md"
 
         if not system_prompt_file.exists():
             raise FileNotFoundError(f"System prompt file not found: {system_prompt_file}")
@@ -265,7 +265,7 @@ class ContentSummarizer:
             Formatted prompt string
         """
         # Determine prompt file path
-        prompt_file = Path(__file__).parent.parent / "docs" / f"analysis_{analysis_mode}.md"
+        prompt_file = Path(__file__).parent.parent / "prose" / "prompts" / f"analysis_{analysis_mode}.md"
 
         if not prompt_file.exists():
             raise FileNotFoundError(f"Analysis prompt file not found: {prompt_file}")
