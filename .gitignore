@@ -100,11 +100,12 @@ Desktop.ini
 # Development & Testing Artifacts
 # -----------------------------------------------------------------------------
 .quibbler/
-test_*.py
+/test_*.py
 *_backup.*
 *.log
 *.tmp
 nul
+.pytest_cache/
 
 # -----------------------------------------------------------------------------
 # Documentation artifacts (dev-only, not for release)

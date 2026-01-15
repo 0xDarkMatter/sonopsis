@@ -19,3 +19,7 @@ anthropic>=0.18.0
 # Utility libraries
 python-dotenv>=1.0.0
 colorama>=0.4.6
+pyyaml>=6.0.0
+
+# Testing
+pytest>=8.0.0
