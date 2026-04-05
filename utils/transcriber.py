@@ -6,7 +6,6 @@ Transcribes audio files using OpenAI's Whisper or WhisperX with speaker diarizat
 import os
 import sys
 import time
-import whisper
 import threading
 import subprocess
 import json
@@ -64,11 +63,13 @@ class AudioTranscriber:
             print(f"[+] WhisperX initialized (model will load on first use)")
 
             # Load vanilla Whisper as fallback in case WhisperX fails (CUDA issues, etc.)
+            import whisper
             print(f"[*] Loading vanilla Whisper as fallback: {model_name}")
             print(f"[*] Model cache: {whisper_cache}")
             self.model = whisper.load_model(model_name, download_root=whisper_cache)
             print(f"[+] Fallback model loaded successfully")
         else:
+            import whisper
             print(f"[*] Loading Whisper model: {model_name}")
             print(f"[*] Model cache: {whisper_cache}")
             self.model = whisper.load_model(model_name, download_root=whisper_cache)

@@ -11,6 +11,22 @@ dependencies = [
     "rich>=13.0.0",
 ]
 
+[tool.setuptools.packages.find]
+include = ["utils*"]
+
+[project.scripts]
+sonopsis = "main:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
 [tool.forma]
 description = "Video/audio summariser - download, transcribe with Whisper/ElevenLabs, and generate AI summaries"
 resources = ["video", "audio", "transcript", "summary"]
