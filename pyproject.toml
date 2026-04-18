@@ -38,4 +38,5 @@ install = "uv tool install --editable ."
 env-key = "OPENAI_API_KEY"
 api-url = "https://platform.openai.com/docs"
 setup-notes = "Requires OpenAI API key for Whisper transcription and GPT/Claude for summaries"
-maturity = "scaffold"
+maturity = "experimental"
+e2e_tests = 0
