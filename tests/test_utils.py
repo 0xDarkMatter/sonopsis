@@ -85,10 +85,17 @@ class TestSummarizerUtils:
         assert result == "dQw4w9WgXcQ"
 
     def test_extract_video_id_invalid_url(self):
-        """Test video ID extraction from invalid URL."""
+        """Invalid URLs return None - never a placeholder like 'N/A', which
+        would inject a slash into output filenames."""
         url = "https://example.com/video"
         result = ContentSummarizer._extract_video_id(url)
-        assert result == "N/A"
+        assert result is None
+
+    def test_extract_video_id_shorts_url(self):
+        """Test video ID extraction from a Shorts URL."""
+        url = "https://www.youtube.com/shorts/dQw4w9WgXcQ"
+        result = ContentSummarizer._extract_video_id(url)
+        assert result == "dQw4w9WgXcQ"
 
     def test_format_number(self):
         """Test number formatting with commas."""
