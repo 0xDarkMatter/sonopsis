@@ -25,7 +25,7 @@ OUT_DIR = Path(__file__).parent.parent / "benchmarks" / "corpus-diarization"
 ROWS_URLS = [
     ("https://datasets-server.huggingface.co/rows?dataset="
      f"openslr%2Flibrispeech_asr&config=clean&split=validation&offset={off}&length=20")
-    for off in (0, 600, 1200)
+    for off in (0, 600, 1200, 1800, 2400)
 ]
 GAP_SECONDS = 0.7
 UTTERANCES_PER_SPEAKER = 3
@@ -131,6 +131,25 @@ def main():
     if len(speakers) >= 3:
         clips3 = download(speakers[:3], "3spk")
         build_conversation("conv_3spk", clips3)
+
+    if len(speakers) >= 4:
+        clips4 = download(speakers[:4], "4spk")
+        build_conversation("conv_4spk", clips4)
+
+    # Noisy variant of the 3-speaker conversation: pink noise changes the
+    # audio but not who-speaks-when, so the reference RTTM stays exact
+    src = OUT_DIR / "conv_3spk.wav"
+    if src.exists():
+        noisy = OUT_DIR / "conv_3spk_noisy.wav"
+        subprocess.run(
+            ["ffmpeg", "-y", "-loglevel", "error", "-i", str(src),
+             "-filter_complex",
+             "anoisesrc=colour=pink:amplitude=0.06:duration=120[n];[0:a][n]amix=inputs=2:duration=first",
+             str(noisy)], check=True, timeout=120)
+        ref = (OUT_DIR / "conv_3spk.rttm").read_text(encoding="utf-8")
+        (OUT_DIR / "conv_3spk_noisy.rttm").write_text(
+            ref.replace("conv_3spk", "conv_3spk_noisy"), encoding="utf-8")
+        print("[+] conv_3spk_noisy.wav: pink-noise variant with identical turns")
 
     # Clean raw downloads
     for p in work.glob("raw_*"):

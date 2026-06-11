@@ -21,7 +21,10 @@ class AudioTranscriber:
                  use_whisperx: bool = False, hf_token: Optional[str] = None,
                  use_elevenlabs: bool = False, elevenlabs_api_key: Optional[str] = None,
                  engine: Optional[str] = None, openai_api_key: Optional[str] = None,
-                 num_speakers: Optional[int] = None):
+                 num_speakers: Optional[int] = None,
+                 min_speakers: Optional[int] = None,
+                 max_speakers: Optional[int] = None,
+                 dia_merge_gap: float = 0.8):
         """
         Initialize the transcriber.
 
@@ -50,9 +53,14 @@ class AudioTranscriber:
         self.hf_token = hf_token or os.getenv("HF_TOKEN")
         self.elevenlabs_api_key = elevenlabs_api_key or os.getenv("ELEVENLABS_API_KEY")
         self.openai_api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
-        # Optional hint for diarizing engines when the speaker count is known
-        # upfront - constrains pyannote's clustering and improves accuracy
+        # Optional hints for diarizing engines: exact count when known, or a
+        # min/max range ("roughly 2-4 people") - both constrain pyannote's
+        # clustering. dia_merge_gap: adjacent same-speaker turns closer than
+        # this many seconds are merged into one.
         self.num_speakers = num_speakers
+        self.min_speakers = min_speakers
+        self.max_speakers = max_speakers
+        self.dia_merge_gap = dia_merge_gap
         self._parakeet_model = None
 
         # Use custom Whisper cache location (defaults to ~/.cache/whisper)
@@ -900,6 +908,13 @@ class AudioTranscriber:
             if self.num_speakers:
                 dia_kwargs["num_speakers"] = self.num_speakers
                 print(f"[*] Using known speaker count: {self.num_speakers}")
+            else:
+                if self.min_speakers:
+                    dia_kwargs["min_speakers"] = self.min_speakers
+                if self.max_speakers:
+                    dia_kwargs["max_speakers"] = self.max_speakers
+                if dia_kwargs:
+                    print(f"[*] Using speaker range hint: {dia_kwargs}")
             output = pipeline({"waveform": waveform, "sample_rate": 16000}, **dia_kwargs)
             # pyannote 4.x wraps the annotation in DiarizeOutput; 3.x returns it directly
             diarization = getattr(output, 'speaker_diarization', output)
@@ -907,7 +922,7 @@ class AudioTranscriber:
             # Merge adjacent same-speaker turns separated by short gaps
             turns = []
             for segment, _, speaker in diarization.itertracks(yield_label=True):
-                if turns and turns[-1][2] == speaker and segment.start - turns[-1][1] < 0.8:
+                if turns and turns[-1][2] == speaker and segment.start - turns[-1][1] < self.dia_merge_gap:
                     turns[-1] = (turns[-1][0], segment.end, speaker)
                 else:
                     turns.append((segment.start, segment.end, speaker))

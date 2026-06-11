@@ -69,9 +69,13 @@ def parse_transcript_turns(text: str, audio_end: float):
     return turns
 
 
-def run_engine(engine: str, audio: Path, out_dir: Path, num_speakers=None):
+def run_engine(engine: str, audio: Path, out_dir: Path, num_speakers=None,
+               min_speakers=None, max_speakers=None, merge_gap=0.8):
     transcriber = AudioTranscriber(output_dir=str(out_dir), engine=engine,
-                                   num_speakers=num_speakers)
+                                   num_speakers=num_speakers,
+                                   min_speakers=min_speakers,
+                                   max_speakers=max_speakers,
+                                   dia_merge_gap=merge_gap)
     start = time.time()
     result = transcriber.transcribe(str(audio))
     elapsed = time.time() - start
@@ -92,6 +96,10 @@ def main():
     parser.add_argument("--report", default=str(Path(__file__).parent.parent / "benchmarks" / "results-diarization.md"))
     parser.add_argument("--hint-speakers", action="store_true",
                         help="Pass the true speaker count (from the RTTM) to engines that accept it")
+    parser.add_argument("--min-speakers", type=int, default=None)
+    parser.add_argument("--max-speakers", type=int, default=None)
+    parser.add_argument("--merge-gap", type=float, default=0.8,
+                        help="Merge adjacent same-speaker turns closer than this (seconds)")
     args = parser.parse_args()
 
     from pyannote.metrics.diarization import DiarizationErrorRate
@@ -111,7 +119,10 @@ def main():
             print(f"\n=== {engine} on {audio.name} ({true_speakers} speakers) ===")
             try:
                 hint = true_speakers if args.hint_speakers else None
-                turns, elapsed = run_engine(engine, audio, out_dir, num_speakers=hint)
+                turns, elapsed = run_engine(engine, audio, out_dir, num_speakers=hint,
+                                            min_speakers=args.min_speakers,
+                                            max_speakers=args.max_speakers,
+                                            merge_gap=args.merge_gap)
                 hypothesis = turns_to_annotation(turns)
                 metric = DiarizationErrorRate(collar=0.25)
                 der = metric(reference, hypothesis)
