@@ -108,6 +108,7 @@ def process_playlist(url: str, args, paths: dict):
                 analysis_mode=args.analysis_mode,
                 keep_files=args.keep_files,
                 transcription_engine=args.transcription_engine,
+                num_speakers=args.num_speakers,
                 video_num=idx,
                 total_videos=len(videos),
                 downloads_dir=paths['downloads'],
@@ -239,6 +240,14 @@ Examples:
         help="Skip videos that already have a summary on disk (makes playlist runs resumable)"
     )
 
+    parser.add_argument(
+        "--num-speakers",
+        type=int,
+        default=None,
+        help="Known speaker count hint for diarizing engines (parakeet-dia) - "
+             "constrains clustering and measurably improves speaker detection"
+    )
+
     return parser
 
 
@@ -279,6 +288,7 @@ def main():
             analysis_mode=args.analysis_mode,
             keep_files=args.keep_files,
             transcription_engine=args.transcription_engine,
+            num_speakers=args.num_speakers,
             downloads_dir=paths['downloads'],
             transcripts_dir=paths['transcripts'],
             summaries_dir=paths['summaries'],

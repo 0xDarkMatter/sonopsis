@@ -69,8 +69,9 @@ def parse_transcript_turns(text: str, audio_end: float):
     return turns
 
 
-def run_engine(engine: str, audio: Path, out_dir: Path):
-    transcriber = AudioTranscriber(output_dir=str(out_dir), engine=engine)
+def run_engine(engine: str, audio: Path, out_dir: Path, num_speakers=None):
+    transcriber = AudioTranscriber(output_dir=str(out_dir), engine=engine,
+                                   num_speakers=num_speakers)
     start = time.time()
     result = transcriber.transcribe(str(audio))
     elapsed = time.time() - start
@@ -89,6 +90,8 @@ def main():
     parser.add_argument("--engines", nargs="+", default=["parakeet-dia"],
                         help="Engines exposing speaker turns: parakeet-dia, elevenlabs, openai")
     parser.add_argument("--report", default=str(Path(__file__).parent.parent / "benchmarks" / "results-diarization.md"))
+    parser.add_argument("--hint-speakers", action="store_true",
+                        help="Pass the true speaker count (from the RTTM) to engines that accept it")
     args = parser.parse_args()
 
     from pyannote.metrics.diarization import DiarizationErrorRate
@@ -107,7 +110,8 @@ def main():
             true_speakers = len(reference.labels())
             print(f"\n=== {engine} on {audio.name} ({true_speakers} speakers) ===")
             try:
-                turns, elapsed = run_engine(engine, audio, out_dir)
+                hint = true_speakers if args.hint_speakers else None
+                turns, elapsed = run_engine(engine, audio, out_dir, num_speakers=hint)
                 hypothesis = turns_to_annotation(turns)
                 metric = DiarizationErrorRate(collar=0.25)
                 der = metric(reference, hypothesis)

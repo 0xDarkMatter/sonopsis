@@ -20,7 +20,8 @@ class AudioTranscriber:
     def __init__(self, model_name: str = "base", output_dir: str = "transcripts",
                  use_whisperx: bool = False, hf_token: Optional[str] = None,
                  use_elevenlabs: bool = False, elevenlabs_api_key: Optional[str] = None,
-                 engine: Optional[str] = None, openai_api_key: Optional[str] = None):
+                 engine: Optional[str] = None, openai_api_key: Optional[str] = None,
+                 num_speakers: Optional[int] = None):
         """
         Initialize the transcriber.
 
@@ -49,6 +50,9 @@ class AudioTranscriber:
         self.hf_token = hf_token or os.getenv("HF_TOKEN")
         self.elevenlabs_api_key = elevenlabs_api_key or os.getenv("ELEVENLABS_API_KEY")
         self.openai_api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
+        # Optional hint for diarizing engines when the speaker count is known
+        # upfront - constrains pyannote's clustering and improves accuracy
+        self.num_speakers = num_speakers
         self._parakeet_model = None
 
         # Use custom Whisper cache location (defaults to ~/.cache/whisper)
@@ -892,7 +896,11 @@ class AudioTranscriber:
             with wave_mod.open(str(wav16), 'rb') as wf:
                 pcm = np.frombuffer(wf.readframes(wf.getnframes()), dtype=np.int16)
             waveform = torch.from_numpy(pcm.astype('float32') / 32768.0).unsqueeze(0)
-            output = pipeline({"waveform": waveform, "sample_rate": 16000})
+            dia_kwargs = {}
+            if self.num_speakers:
+                dia_kwargs["num_speakers"] = self.num_speakers
+                print(f"[*] Using known speaker count: {self.num_speakers}")
+            output = pipeline({"waveform": waveform, "sample_rate": 16000}, **dia_kwargs)
             # pyannote 4.x wraps the annotation in DiarizeOutput; 3.x returns it directly
             diarization = getattr(output, 'speaker_diarization', output)
 

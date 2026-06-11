@@ -67,6 +67,7 @@ def process_video(
     downloads_dir: str = "downloads",
     transcripts_dir: str = "transcripts",
     summaries_dir: str = "summaries",
+    num_speakers: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Process a single YouTube video: download, transcribe, and summarize.
@@ -98,6 +99,7 @@ def process_video(
             hf_token=os.getenv("HF_TOKEN"),
             elevenlabs_api_key=os.getenv("ELEVENLABS_API_KEY"),
             openai_api_key=os.getenv("OPENAI_API_KEY"),
+            num_speakers=num_speakers,
         )
         transcript_data = transcriber.transcribe(video_data['audio_file'])
         print(f"{Fore.CYAN}[+] Transcription complete ({transcript_data['language']}){Style.RESET_ALL}\n")
