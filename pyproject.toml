@@ -41,6 +41,10 @@ elevenlabs = ["elevenlabs>=1.0.0"]
 # NVIDIA Parakeet local transcription via ONNX (~70MB deps + ~670MB int8 model
 # on first use; no PyTorch). Install: uv sync --extra parakeet
 parakeet = ["onnx-asr[cpu,hub]>=0.10.0"]
+# Speaker diarization for parakeet-dia and WhisperX (pyannote pulls torch;
+# requires HF_TOKEN + accepted terms on the gated pyannote models).
+# Install: uv sync --extra diarize
+diarize = ["pyannote.audio>=4.0"]
 
 [tool.forma]
 description = "Video/audio summariser - download, transcribe with Whisper/ElevenLabs, and generate AI summaries"

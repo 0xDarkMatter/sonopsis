@@ -190,7 +190,7 @@ Examples:
     parser.add_argument(
         "--transcription-engine",
         default=default_engine(defaults.get('transcription_engine')),
-        choices=["whisper", "whisperx", "parakeet", "elevenlabs", "openai"],
+        choices=["whisper", "whisperx", "parakeet", "parakeet-dia", "elevenlabs", "openai"],
         help="Transcription engine: whisper (local, free), whisperx (local + speaker diarization), "
              "parakeet (local, beats Whisper accuracy, no PyTorch needed), "
              "elevenlabs (cloud, diarization), openai (cloud gpt-4o-transcribe-diarize) "

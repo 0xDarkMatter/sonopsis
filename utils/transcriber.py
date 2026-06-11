@@ -63,11 +63,27 @@ class AudioTranscriber:
             if not self.openai_api_key:
                 print(f"{Fore.YELLOW}[!] Warning: No OPENAI_API_KEY found - transcription will fail.{Style.RESET_ALL}")
             self.model = None  # No local model needed
-        elif self.engine == "parakeet":
+        elif self.engine in ("parakeet", "parakeet-dia"):
             # NVIDIA Parakeet TDT 0.6B v3 via onnx-asr: pure-Python, no torch,
             # ~670MB int8 model downloaded to the HF cache on first use
             self._import_onnx_asr()  # fail fast with install hint if missing
-            print(f"[*] Using NVIDIA Parakeet TDT 0.6B v3 (local, 25 languages)")
+            if self.engine == "parakeet-dia":
+                # Diarized variant: pyannote segments speakers, parakeet
+                # transcribes each turn
+                try:
+                    import pyannote.audio  # noqa: F401
+                except ImportError as e:
+                    raise ImportError(
+                        "parakeet-dia requires pyannote.audio. Install with:\n"
+                        "  uv sync --extra diarize\n"
+                        "and set HF_TOKEN (accept terms on pyannote/speaker-diarization-3.1 "
+                        "and pyannote/segmentation-3.0)."
+                    ) from e
+                if not self.hf_token:
+                    print(f"{Fore.YELLOW}[!] Warning: No HF_TOKEN found - pyannote model download will fail.{Style.RESET_ALL}")
+                print(f"[*] Using Parakeet + pyannote speaker diarization (local)")
+            else:
+                print(f"[*] Using NVIDIA Parakeet TDT 0.6B v3 (local, 25 languages)")
             print(f"[+] Parakeet initialized (model will load on first use)")
             self.model = None
         elif self.use_elevenlabs:
@@ -229,6 +245,8 @@ class AudioTranscriber:
             return self._transcribe_openai(audio_path, language)
         elif self.engine == "parakeet":
             return self._transcribe_parakeet(audio_path, language)
+        elif self.engine == "parakeet-dia":
+            return self._transcribe_parakeet_dia(audio_path, language)
         else:
             return self._transcribe_vanilla(audio_path, language, podcast_mode)
 
@@ -827,18 +845,128 @@ class AudioTranscriber:
             raise Exception(f"ffmpeg segmentation failed: {result.stderr[-300:]}")
         return sorted(tmp_dir.glob("chunk_*.wav"))
 
+    def _ensure_parakeet_model(self):
+        """Load the Parakeet ONNX model if not yet loaded."""
+        if self._parakeet_model is None:
+            onnx_asr = self._import_onnx_asr()
+            print(f"[*] Loading Parakeet TDT 0.6B v3 (int8) - first run downloads ~670MB to the HF cache...")
+            self._parakeet_model = onnx_asr.load_model(
+                "nemo-parakeet-tdt-0.6b-v3", quantization="int8"
+            )
+            print(f"[+] Parakeet model loaded")
+        return self._parakeet_model
+
+    def _transcribe_parakeet_dia(self, audio_path: Path, language: Optional[str]) -> Dict[str, Any]:
+        """
+        Diarized local transcription: pyannote finds who-speaks-when, then
+        Parakeet transcribes each speaker turn separately. Per-turn slicing
+        avoids the word-to-speaker timestamp alignment problem entirely.
+        """
+        import tempfile
+        from pyannote.audio import Pipeline
+
+        model = self._ensure_parakeet_model()
+
+        # pyannote and slicing both want a 16kHz mono WAV
+        tmp_dir = Path(tempfile.mkdtemp(prefix="sonopsis_dia_"))
+        wav16 = tmp_dir / "audio16k.wav"
+        try:
+            subprocess.run(
+                ['ffmpeg', '-y', '-loglevel', 'error', '-i', str(audio_path),
+                 '-ac', '1', '-ar', '16000', str(wav16)],
+                check=True, timeout=1800,
+            )
+
+            print(f"[*] Running pyannote speaker diarization...")
+            # pyannote 4.x: community-1 is the current pipeline (gated - accept
+            # terms at hf.co/pyannote/speaker-diarization-community-1)
+            pipeline = Pipeline.from_pretrained(
+                "pyannote/speaker-diarization-community-1", token=self.hf_token
+            )
+            # Feed an in-memory waveform: pyannote 4's file decoder (torchcodec)
+            # is unreliable on Windows, and we already have a known-format
+            # 16kHz mono PCM16 wav that stdlib `wave` can read
+            import wave as wave_mod
+            import numpy as np
+            import torch
+            with wave_mod.open(str(wav16), 'rb') as wf:
+                pcm = np.frombuffer(wf.readframes(wf.getnframes()), dtype=np.int16)
+            waveform = torch.from_numpy(pcm.astype('float32') / 32768.0).unsqueeze(0)
+            output = pipeline({"waveform": waveform, "sample_rate": 16000})
+            # pyannote 4.x wraps the annotation in DiarizeOutput; 3.x returns it directly
+            diarization = getattr(output, 'speaker_diarization', output)
+
+            # Merge adjacent same-speaker turns separated by short gaps
+            turns = []
+            for segment, _, speaker in diarization.itertracks(yield_label=True):
+                if turns and turns[-1][2] == speaker and segment.start - turns[-1][1] < 0.8:
+                    turns[-1] = (turns[-1][0], segment.end, speaker)
+                else:
+                    turns.append((segment.start, segment.end, speaker))
+            print(f"[+] {len(turns)} speaker turns, "
+                  f"{len({t[2] for t in turns})} speakers detected")
+
+            # Transcribe each turn with Parakeet
+            lines = []
+            for i, (start, end, speaker) in enumerate(turns):
+                clip = tmp_dir / f"turn_{i:03d}.wav"
+                subprocess.run(
+                    ['ffmpeg', '-y', '-loglevel', 'error', '-i', str(wav16),
+                     '-ss', f"{start:.2f}", '-to', f"{end:.2f}", str(clip)],
+                    check=True, timeout=300,
+                )
+                text = (model.recognize(str(clip)) or '').strip()
+                clip.unlink()
+                if text:
+                    lines.append(
+                        f"**[{speaker.upper()}]** `[{self._format_timestamp(start)}]` {text}\n"
+                    )
+
+            plain_text = '\n'.join(lines)
+            if not plain_text:
+                raise Exception("parakeet-dia produced an empty transcript")
+
+            duration = self._get_audio_duration(str(audio_path))
+            markdown_content = f"""# Transcript
+
+**Language:** {language or 'auto'}
+**Duration:** {self._format_timestamp(duration)}
+**Transcription:** Parakeet TDT 0.6B v3 + pyannote 3.1 (Speaker Diarization)
+
+---
+
+{plain_text}
+"""
+            md_file = self.output_dir / f"{audio_path.stem}_transcript.md"
+            with open(md_file, 'w', encoding='utf-8') as f:
+                f.write(markdown_content)
+
+            print(f"[+] Transcription complete")
+            print(f"[*] Saved to: {md_file}")
+
+            return {
+                'text': plain_text,
+                'language': language or 'auto',
+                'text_file': str(md_file),
+                # (start, end, speaker) turns for downstream scoring (DER)
+                'turns': turns,
+            }
+
+        except Exception as e:
+            raise Exception(f"parakeet-dia transcription failed: {str(e)}")
+        finally:
+            for f in tmp_dir.glob("*"):
+                f.unlink(missing_ok=True)
+            try:
+                tmp_dir.rmdir()
+            except OSError:
+                pass
+
     def _transcribe_parakeet(self, audio_path: Path, language: Optional[str]) -> Dict[str, Any]:
         """Transcribe using NVIDIA Parakeet TDT 0.6B v3 (local, int8 ONNX)."""
         chunks = []
         try:
-            onnx_asr = self._import_onnx_asr()
-
-            if self._parakeet_model is None:
-                print(f"[*] Loading Parakeet TDT 0.6B v3 (int8) - first run downloads ~670MB to the HF cache...")
-                self._parakeet_model = onnx_asr.load_model(
-                    "nemo-parakeet-tdt-0.6b-v3", quantization="int8"
-                )
-                print(f"[+] Parakeet model loaded")
+            self._ensure_parakeet_model()
 
             duration = self._get_audio_duration(str(audio_path))
             print(f"[*] Audio duration: {self._format_timestamp(duration)}")

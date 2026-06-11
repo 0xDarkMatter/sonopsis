@@ -22,6 +22,7 @@ ENGINE_DISPLAY = {
     "whisper": "Whisper",
     "whisperx": "WhisperX",
     "parakeet": "NVIDIA Parakeet",
+    "parakeet-dia": "Parakeet + pyannote",
     "elevenlabs": "ElevenLabs",
     "openai": "OpenAI gpt-4o-transcribe",
 }
