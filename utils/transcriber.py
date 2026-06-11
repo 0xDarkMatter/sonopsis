@@ -24,7 +24,10 @@ class AudioTranscriber:
                  num_speakers: Optional[int] = None,
                  min_speakers: Optional[int] = None,
                  max_speakers: Optional[int] = None,
-                 dia_merge_gap: float = 0.8):
+                 dia_merge_gap: float = 0.8,
+                 parakeet_quant: Optional[str] = "int8",
+                 parakeet_chunk_seconds: int = 120,
+                 parakeet_align_silence: bool = True):
         """
         Initialize the transcriber.
 
@@ -61,6 +64,12 @@ class AudioTranscriber:
         self.min_speakers = min_speakers
         self.max_speakers = max_speakers
         self.dia_merge_gap = dia_merge_gap
+        # Parakeet tuning: quantization (None = fp32, ~2.5GB; "int8" = ~670MB),
+        # chunk length for long audio, and whether chunk boundaries snap to
+        # detected silences instead of cutting mid-word
+        self.parakeet_quant = parakeet_quant
+        self.parakeet_chunk_seconds = parakeet_chunk_seconds
+        self.parakeet_align_silence = parakeet_align_silence
         self._parakeet_model = None
 
         # Use custom Whisper cache location (defaults to ~/.cache/whisper)
@@ -843,10 +852,61 @@ class AudioTranscriber:
                 f"Original error: {e}"
             ) from e
 
-    def _segment_to_wav(self, audio_path: Path, segment_seconds: int = 120) -> list:
-        """Split audio into 16kHz mono WAV segments via ffmpeg (temp files)."""
+    def _detect_silences(self, audio_path: Path) -> list:
+        """Silence midpoints (seconds) via ffmpeg silencedetect."""
+        result = subprocess.run(
+            ['ffmpeg', '-i', str(audio_path), '-af',
+             'silencedetect=noise=-35dB:d=0.3', '-f', 'null', '-'],
+            capture_output=True, text=True, timeout=1800,
+        )
+        import re as re_mod
+        starts = [float(m) for m in re_mod.findall(r'silence_start:\s*([\d.]+)', result.stderr)]
+        ends = [float(m) for m in re_mod.findall(r'silence_end:\s*([\d.]+)', result.stderr)]
+        return [(s + e) / 2 for s, e in zip(starts, ends)]
+
+    def _segment_to_wav(self, audio_path: Path, segment_seconds: Optional[int] = None) -> list:
+        """
+        Split audio into 16kHz mono WAV segments via ffmpeg (temp files).
+
+        When parakeet_align_silence is on, each cut snaps to the nearest
+        detected silence within +-40% of the chunk length - a hard cut in the
+        middle of a word guarantees a transcription error at every boundary.
+        """
         import tempfile
+        if segment_seconds is None:
+            segment_seconds = self.parakeet_chunk_seconds
         tmp_dir = Path(tempfile.mkdtemp(prefix="sonopsis_parakeet_"))
+
+        duration = self._get_audio_duration(str(audio_path))
+        boundaries = None
+        if self.parakeet_align_silence and duration > segment_seconds:
+            silences = self._detect_silences(audio_path)
+            if silences:
+                boundaries, t, window = [0.0], 0.0, segment_seconds * 0.4
+                while t + segment_seconds < duration:
+                    target = t + segment_seconds
+                    candidates = [s for s in silences if abs(s - target) <= window and s > t + 1]
+                    cut = min(candidates, key=lambda s: abs(s - target)) if candidates else target
+                    boundaries.append(cut)
+                    t = cut
+                boundaries.append(duration)
+
+        if boundaries:
+            chunks = []
+            for i in range(len(boundaries) - 1):
+                chunk = tmp_dir / f"chunk_{i:04d}.wav"
+                result = subprocess.run(
+                    ['ffmpeg', '-y', '-loglevel', 'error', '-i', str(audio_path),
+                     '-ss', f"{boundaries[i]:.3f}", '-to', f"{boundaries[i + 1]:.3f}",
+                     '-ac', '1', '-ar', '16000', str(chunk)],
+                    capture_output=True, text=True, timeout=1800,
+                )
+                if result.returncode != 0:
+                    raise Exception(f"ffmpeg segmentation failed: {result.stderr[-300:]}")
+                chunks.append(chunk)
+            return chunks
+
+        # Fallback: fixed-length segments (no silences found, or alignment off)
         pattern = tmp_dir / "chunk_%04d.wav"
         result = subprocess.run(
             ['ffmpeg', '-y', '-i', str(audio_path), '-ac', '1', '-ar', '16000',
@@ -861,9 +921,10 @@ class AudioTranscriber:
         """Load the Parakeet ONNX model if not yet loaded."""
         if self._parakeet_model is None:
             onnx_asr = self._import_onnx_asr()
-            print(f"[*] Loading Parakeet TDT 0.6B v3 (int8) - first run downloads ~670MB to the HF cache...")
+            label = self.parakeet_quant or "fp32"
+            print(f"[*] Loading Parakeet TDT 0.6B v3 ({label}) - first run downloads the model to the HF cache...")
             self._parakeet_model = onnx_asr.load_model(
-                "nemo-parakeet-tdt-0.6b-v3", quantization="int8"
+                "nemo-parakeet-tdt-0.6b-v3", quantization=self.parakeet_quant
             )
             print(f"[+] Parakeet model loaded")
         return self._parakeet_model

@@ -91,6 +91,49 @@ def build_conversation(name: str, speaker_clips: dict):
           f"{len(speaker_clips)} speakers, {t:.1f}s")
 
 
+def build_overlap_conversation(name: str, speaker_clips: dict, overlap: float = 1.0):
+    """Like build_conversation, but each turn starts before the previous one
+    ends - crosstalk with an exact overlapping reference RTTM."""
+    work = OUT_DIR / "_work"
+    work.mkdir(parents=True, exist_ok=True)
+
+    order = []
+    for i in range(UTTERANCES_PER_SPEAKER):
+        for spk, clips in speaker_clips.items():
+            if i < len(clips):
+                order.append((spk, clips[i]))
+
+    segments, t = [], 0.0
+    inputs, delays = [], []
+    for idx, (spk, clip) in enumerate(order):
+        norm = work / f"{name}_{idx:02d}.wav"
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(clip),
+                        "-ac", "1", "-ar", "16000", str(norm)], check=True, timeout=60)
+        dur = ffprobe_duration(norm)
+        segments.append((t, dur, spk))
+        inputs += ["-i", str(norm)]
+        delays.append(int(t * 1000))
+        t += dur - overlap  # next speaker starts before this one finishes
+
+    delay_filters = "".join(
+        f"[{i}:a]adelay={d}|{d}[d{i}];" for i, d in enumerate(delays))
+    mix_in = "".join(f"[d{i}]" for i in range(len(delays)))
+    filter_complex = f"{delay_filters}{mix_in}amix=inputs={len(delays)}:normalize=0[out]"
+
+    out_wav = OUT_DIR / f"{name}.wav"
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", *inputs,
+                    "-filter_complex", filter_complex, "-map", "[out]", str(out_wav)],
+                   check=True, timeout=300)
+
+    with open(OUT_DIR / f"{name}.rttm", "w", encoding="utf-8") as f:
+        for start, dur, spk in segments:
+            f.write(f"SPEAKER {name} 1 {start:.3f} {dur:.3f} <NA> <NA> {spk} <NA> <NA>\n")
+
+    for i in range(len(order)):
+        (work / f"{name}_{i:02d}.wav").unlink(missing_ok=True)
+    print(f"[+] {out_wav.name}: {len(segments)} turns with {overlap}s crosstalk overlap")
+
+
 def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     print("[*] Fetching LibriSpeech sample metadata...")
@@ -127,6 +170,7 @@ def main():
 
     clips2 = download(speakers[:2], "2spk")
     build_conversation("conv_2spk", clips2)
+    build_overlap_conversation("conv_2spk_overlap", clips2)
 
     if len(speakers) >= 3:
         clips3 = download(speakers[:3], "3spk")

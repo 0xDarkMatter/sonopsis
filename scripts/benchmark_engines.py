@@ -70,12 +70,17 @@ def load_corpus(corpus_dir: Path) -> list:
 
 
 def run_engine(spec: str, audio: Path, out_dir: Path) -> dict:
-    """spec is 'engine' or 'whisper:<size>'. Returns result row."""
-    engine, _, size = spec.partition(":")
+    """spec is 'engine', 'whisper:<size>', or 'parakeet:<int8|fp32>'."""
+    engine, _, opt = spec.partition(":")
+    kwargs = {}
+    if engine.startswith("parakeet") and opt:
+        kwargs["parakeet_quant"] = None if opt == "fp32" else opt
+        opt = ""
     transcriber = AudioTranscriber(
-        model_name=size or "base",
+        model_name=opt or "base",
         output_dir=str(out_dir),
         engine=engine,
+        **kwargs,
     )
     start = time.time()
     result = transcriber.transcribe(str(audio))
