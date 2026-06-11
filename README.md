@@ -27,17 +27,18 @@ A Python application that downloads YouTube videos, transcribes them using OpenA
 - **External Prompt Files**: Easily customize analysis prompts via markdown files
 - **AI-Powered Summaries**: Generates well-formatted summaries with timestamps, quotes, and references
 - **Multiple AI Models**:
+  - Claude Code CLI: uses your Claude Pro/Max subscription - no API key or per-token cost (`claude-cli`, `claude-cli/sonnet`, `claude-cli/opus`, `claude-cli/haiku`)
+  - Anthropic: Claude Sonnet 4.6, Claude Haiku 4.5, Claude Opus 4.8
   - OpenAI: GPT-4o-mini, GPT-4o, GPT-5.1
-  - Anthropic: Claude Haiku 4.5, Claude Sonnet 4.5
   - OpenRouter: Kimi K2, GLM 4.6
 - **Customizable Whisper Models**: Choose from tiny, base, small, medium, or large models
 - **Progress Tracking**: Real-time progress updates for batch processing
 
 ## Prerequisites
 
-- Python 3.8 or higher
+- Python 3.11 or higher
 - FFmpeg (required for audio processing)
-- OpenAI API key
+- A summarization backend: OpenAI/Anthropic/OpenRouter API key, or the Claude Code CLI (uses your Claude subscription)
 
 ### Installing FFmpeg
 
@@ -66,8 +67,24 @@ sudo yum install ffmpeg  # CentOS/RHEL
 
 2. **Install Python dependencies:**
 ```bash
+# Core install (summarization + ElevenLabs-ready, no local models)
+uv sync
+
+# Add local Whisper transcription (downloads PyTorch CPU wheels, ~2GB)
+uv sync --extra whisper
+
+# Add ElevenLabs cloud transcription SDK
+uv sync --extra elevenlabs
+
+# Legacy pip fallback
 pip install -r requirements.txt
 ```
+
+> **No API key?** If the [Claude Code CLI](https://claude.com/claude-code) is installed,
+> Sonopsis automatically uses it for summarization on your Claude Pro/Max subscription -
+> no `ANTHROPIC_API_KEY` needed. Select "Claude Code (Max plan)" in the interactive menu,
+> or pass `--gpt-model claude-cli` (optionally `claude-cli/sonnet`, `claude-cli/opus`,
+> `claude-cli/haiku`).
 
 3. **Set up your API keys:**
    - Copy `.env.example` to `.env`
@@ -102,21 +119,28 @@ HF_TOKEN=your_huggingface_token_here
 Sonopsis/
 ├── sonopsis.py              # Interactive menu interface (recommended)
 ├── main.py                  # Command-line interface
-├── requirements.txt         # Python dependencies
+├── pyproject.toml           # Project metadata + dependencies (uv-managed)
+├── config.yaml              # Non-secret defaults (models, paths)
 ├── .env.example             # API key template
 ├── LICENSE                  # MIT license
 ├── utils/                   # Core modules
 │   ├── downloader.py        # YouTube video/audio download
 │   ├── transcriber.py       # Whisper/WhisperX/ElevenLabs transcription
-│   └── summarizer.py        # GPT/Claude/OpenRouter summarization
+│   ├── summarizer.py        # GPT/Claude/OpenRouter/Claude-CLI summarization
+│   ├── pipeline.py          # Shared download->transcribe->summarize flow
+│   ├── models.py            # AI model registry (IDs, costs, limits)
+│   └── config.py            # config.yaml loader
+├── prose/                   # LLM prompts and protocols
+│   ├── prompts/system.md            # AI system prompt
+│   ├── prompts/analysis_basic.md    # Basic analysis prompt
+│   ├── prompts/analysis_advanced.md # Advanced analysis prompt
+│   └── protocols/speaker_identification.md
 ├── scripts/                 # Utility scripts
-│   ├── compare_models.py    # Compare AI model outputs
-│   └── process_existing.py  # Process existing transcripts
+│   ├── compare_models.py    # Compare AI model outputs on one transcript
+│   └── process_existing.py  # Transcribe + summarize a local audio file
+├── tests/                   # Unit tests (pytest) + e2e suite
 ├── docs/                    # Documentation
-│   ├── PLAN.md              # Future enhancements
-│   ├── analysis_basic.md    # Basic analysis prompt
-│   ├── analysis_advanced.md # Advanced analysis prompt
-│   └── system_prompt.md     # AI system prompt
+│   └── PLAN.md              # Future enhancements
 ├── downloads/               # Temporary audio files (auto-cleaned)
 ├── transcripts/             # Generated transcripts
 └── summaries/               # AI-generated summaries
@@ -150,6 +174,10 @@ python main.py <YouTube_URL>
 # Process a single video with default settings (local Whisper)
 python main.py https://www.youtube.com/watch?v=dQw4w9WgXcQ
 
+# Summarize on your Claude subscription via the Claude Code CLI (no API key)
+python main.py <URL> --gpt-model claude-cli
+python main.py <URL> --gpt-model claude-cli/opus
+
 # Process an entire playlist
 python main.py "https://www.youtube.com/playlist?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf"
 
@@ -163,7 +191,7 @@ python main.py <URL> --transcription-engine elevenlabs
 python main.py https://youtu.be/dQw4w9WgXcQ --whisper-model small
 
 # Use Claude Sonnet for highest quality summaries
-python main.py <URL> --gpt-model claude-sonnet-4-5-20250929
+python main.py <URL> --gpt-model claude-sonnet-4-6
 
 # Use GPT-5.1 for complex reasoning
 python main.py <URL> --gpt-model gpt-5.1
@@ -190,13 +218,17 @@ python main.py <URL> --keep-files
   - `elevenlabs`: Cloud transcription, paid, 99 languages, speaker diarization + audio events
 - `--whisper-model`: Whisper model size - `tiny`, `base`, `small`, `medium`, `large` (default: `base`)
   - Only applies to `whisper` and `whisperx` engines
-- `--gpt-model`: AI model for summaries (default: `claude-sonnet-4-5-20250929`)
+- `--gpt-model`: AI model for summaries (default: `claude-cli` when the Claude Code CLI is installed, else `claude-sonnet-4-6`)
+  - Claude Code CLI (subscription): `claude-cli`, `claude-cli/sonnet`, `claude-cli/opus`, `claude-cli/haiku`
+  - Anthropic Claude: `claude-sonnet-4-6`, `claude-haiku-4-5-20251001`, `claude-opus-4-8`
   - OpenAI: `gpt-4o-mini`, `gpt-4o`, `gpt-5.1`
-  - Anthropic Claude: `claude-haiku-4-5-20251001`, `claude-sonnet-4-5-20250929`
   - OpenRouter: `openrouter/moonshot/kimi-k2`, `openrouter/zhipuai/glm-4.6-plus`
 - `--analysis-mode`: Analysis mode - `basic` or `advanced` (default: `basic`)
 - `--keep-files`: Keep downloaded audio files after processing
 - `--start-from`: Start processing from video number (for playlists, default: 1)
+- `--skip-existing`: Skip videos that already have a summary on disk (makes playlist runs resumable)
+
+Defaults for models, engine, analysis mode and output paths can also be set in `config.yaml`.
 
 ### Playlist Processing
 
@@ -214,7 +246,9 @@ The tool automatically detects playlist URLs and processes all videos sequential
 |-------------|-------|------------|-----------|------------|--------------|------------|--------------------------------|
 | Whisper     | Free  | Fast       | ~60       | No         | No           | No         | Best for quick, simple transcription |
 | WhisperX    | Free  | Medium     | ~60       | Yes        | No           | No         | Requires HF token, GPU recommended |
+| Parakeet    | Free  | Very Fast  | 25 (EU)   | No         | No           | No         | NVIDIA TDT 0.6B v3 - beats Whisper accuracy, no PyTorch, ~670MB model, CPU-friendly (`uv sync --extra parakeet`) |
 | ElevenLabs  | Paid* | Very Fast  | 99        | Yes (32)   | Yes          | Yes        | Cloud-based, YouTube bookmarks  |
+| OpenAI      | Paid ($0.36/hr) | Very Fast | ~60 | Yes      | No           | Yes        | gpt-4o-transcribe-diarize - reuses your OPENAI_API_KEY, files >25MB auto re-encoded |
 
 \* ElevenLabs offers a free tier with 2.5 hours/month included
 
@@ -344,7 +378,8 @@ Generates summaries using OpenAI's GPT models.
 - `gpt-4o`: ~$0.15-0.30
 - `gpt-5.1`: ~$0.20-0.40 (latest reasoning model)
 - `claude-haiku-4-5`: ~$0.03-0.10 (fastest, cheapest)
-- `claude-sonnet-4-5`: ~$0.10-0.30 (best overall quality)
+- `claude-sonnet-4-6`: ~`claude-sonnet-4-5`: ~$0.10-0.30 (best overall quality).10-0.30 (best overall quality)
+- `claude-cli`: `claude-sonnet-4-5`: ~$0.10-0.30 (best overall quality) extra (uses your Claude subscription)
 - `kimi-k2` (OpenRouter): ~$0.15-0.40 (200K+ context)
 - `glm-4.6-plus` (OpenRouter): ~$0.10-0.25 (excellent multilingual)
 
@@ -401,7 +436,7 @@ Use a smaller model: `--whisper-model tiny` or `--whisper-model base`
 
 **Summarization:**
 1. **Lower costs**: Use `--gpt-model gpt-4o-mini` or `--gpt-model claude-haiku-4-5-20251001`
-2. **Higher quality**: Use `--gpt-model claude-sonnet-4-5-20250929`
+2. **Higher quality**: Use `--gpt-model claude-sonnet-4-6`
 3. **Complex reasoning**: Use `--gpt-model gpt-5.1` (latest OpenAI reasoning model)
 4. **Long context**: Use `--gpt-model openrouter/moonshot/kimi-k2` (200K+ tokens)
 5. **Multilingual**: Use `--gpt-model openrouter/zhipuai/glm-4.6-plus` (excellent for Chinese)

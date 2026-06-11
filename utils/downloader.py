@@ -3,11 +3,11 @@ YouTube Video Downloader Module
 Downloads videos from YouTube and extracts audio for transcription.
 """
 
-import os
 import sys
 import yt_dlp
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
+from urllib.parse import urlparse, parse_qs
 from colorama import Fore, Style
 import re
 
@@ -49,7 +49,7 @@ class YouTubeDownloader:
                 progress_text = f"\r{Fore.CYAN}[{bar}] {percent} | {speed} | ETA: {eta}{Style.RESET_ALL}"
                 sys.stdout.write(progress_text)
                 sys.stdout.flush()
-            except:
+            except Exception:
                 # Fallback to simple display
                 sys.stdout.write(f"\r{Fore.CYAN}Downloading... {percent}{Style.RESET_ALL}")
                 sys.stdout.flush()
@@ -63,7 +63,35 @@ class YouTubeDownloader:
             if hasattr(self, '_progress_started'):
                 delattr(self, '_progress_started')
 
-    def download_video(self, url: str, audio_only: bool = True) -> Dict[str, str]:
+    @staticmethod
+    def _build_metadata(info: Dict[str, Any], audio_file: Path, url: str) -> Dict[str, Any]:
+        """Build the video metadata dict from a yt-dlp info object."""
+        # Sanitize title for safe handling
+        title = info.get('title', 'Unknown')
+        try:
+            title.encode('utf-8')
+        except (UnicodeEncodeError, UnicodeDecodeError, AttributeError):
+            title = 'Video'
+
+        return {
+            'title': title,
+            'duration': info.get('duration', 0),
+            'uploader': info.get('uploader', 'Unknown'),
+            'upload_date': info.get('upload_date', 'Unknown'),
+            'description': info.get('description', ''),
+            'view_count': info.get('view_count', 0),
+            'like_count': info.get('like_count', 0),
+            'channel_url': info.get('channel_url', ''),
+            'tags': info.get('tags', []),
+            'categories': info.get('categories', []),
+            'chapters': info.get('chapters', []),
+            'language': info.get('language', ''),
+            'audio_file': str(audio_file),
+            'url': url,
+            'reused_existing': False,
+        }
+
+    def download_video(self, url: str, audio_only: bool = True) -> Dict[str, Any]:
         """
         Download a YouTube video and extract audio.
 
@@ -72,7 +100,10 @@ class YouTubeDownloader:
             audio_only: If True, only download audio (default: True)
 
         Returns:
-            Dictionary containing file paths and video metadata
+            Dictionary containing file paths and video metadata.
+            'reused_existing' is True when a previously downloaded file was
+            used instead of downloading - callers should not delete it during
+            cleanup.
 
         Raises:
             Exception: If download fails
@@ -82,16 +113,31 @@ class YouTubeDownloader:
         if not video_id:
             raise Exception("Could not extract video ID from URL")
 
-        # Check for existing files
+        # Check for existing files. Only prompt on an interactive terminal -
+        # unattended runs (cron, CI, piped input) would block forever on
+        # input(), so they auto-reuse the cached audio.
         existing_files = list(self.output_dir.glob(f"YT_{video_id}_*.mp3"))
         if existing_files:
             print(f"\n{Fore.YELLOW}[!] Audio file already exists: {existing_files[0].name}{Style.RESET_ALL}")
-            response = input(f"{Fore.CYAN}Use downloaded source? (Y/N): {Style.RESET_ALL}").strip().upper()
+            # isatty() alone is not enough: on Windows, NUL (subprocess
+            # DEVNULL) reports as a tty, so EOF from input() must also count
+            # as non-interactive.
+            if sys.stdin and sys.stdin.isatty():
+                try:
+                    response = input(f"{Fore.CYAN}Use downloaded source? (Y/N): {Style.RESET_ALL}").strip().upper()
+                    reuse = (response == 'Y')
+                except EOFError:
+                    print(f"\n{Fore.GREEN}[+] Non-interactive session: reusing existing audio file{Style.RESET_ALL}")
+                    reuse = True
+            else:
+                print(f"{Fore.GREEN}[+] Non-interactive session: reusing existing audio file{Style.RESET_ALL}")
+                reuse = True
 
-            if response == 'Y':
+            if reuse:
                 print(f"{Fore.GREEN}[+] Using existing audio file{Style.RESET_ALL}\n")
-                # Get metadata without downloading
-                return self._get_metadata_for_existing_file(url, existing_files[0])
+                result = self._get_metadata_for_existing_file(url, existing_files[0])
+                result['reused_existing'] = True
+                return result
 
         # Configure download options with YT_{ID}_{Title} naming
         ydl_opts = {
@@ -99,6 +145,7 @@ class YouTubeDownloader:
             'outtmpl': str(self.output_dir / f'YT_{video_id}_%(title).180B.%(ext)s'),
             'quiet': True,
             'no_warnings': True,
+            'noplaylist': True,  # A watch URL with &list= should download one video, not the playlist
             'socket_timeout': 30,
             'retries': 3,
             'fragment_retries': 3,
@@ -127,37 +174,12 @@ class YouTubeDownloader:
                 else:
                     audio_file = Path(ydl.prepare_filename(info))
 
-                # Sanitize title for safe handling
-                title = info.get('title', 'Unknown')
-                try:
-                    # Try to encode to ensure it's safe
-                    title.encode('utf-8')
-                except (UnicodeEncodeError, UnicodeDecodeError, AttributeError):
-                    title = 'Video'
-
-                result = {
-                    'title': title,
-                    'duration': info.get('duration', 0),
-                    'uploader': info.get('uploader', 'Unknown'),
-                    'upload_date': info.get('upload_date', 'Unknown'),
-                    'description': info.get('description', ''),
-                    'view_count': info.get('view_count', 0),
-                    'like_count': info.get('like_count', 0),
-                    'channel_url': info.get('channel_url', ''),
-                    'tags': info.get('tags', []),
-                    'categories': info.get('categories', []),
-                    'chapters': info.get('chapters', []),
-                    'language': info.get('language', ''),
-                    'audio_file': str(audio_file),
-                    'url': url
-                }
-
-                return result
+                return self._build_metadata(info, audio_file, url)
 
         except Exception as e:
             raise Exception(f"Failed to download video: {str(e)}")
 
-    def get_video_info(self, url: str) -> Dict[str, any]:
+    def get_video_info(self, url: str) -> Dict[str, Any]:
         """
         Get video information without downloading.
 
@@ -184,7 +206,8 @@ class YouTubeDownloader:
         except Exception as e:
             raise Exception(f"Failed to get video info: {str(e)}")
 
-    def _extract_video_id(self, url: str) -> Optional[str]:
+    @staticmethod
+    def _extract_video_id(url: str) -> Optional[str]:
         """
         Extract YouTube video ID from URL.
 
@@ -196,9 +219,8 @@ class YouTubeDownloader:
         """
         # Handle different YouTube URL formats
         patterns = [
-            r'(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})',
-            r'youtube\.com\/embed\/([a-zA-Z0-9_-]{11})',
-            r'youtube\.com\/v\/([a-zA-Z0-9_-]{11})'
+            r'(?:youtube\.com/watch\?(?:[^#]*&)?v=|youtu\.be/)([a-zA-Z0-9_-]{11})',
+            r'youtube\.com/(?:embed|v|shorts|live)/([a-zA-Z0-9_-]{11})',
         ]
 
         for pattern in patterns:
@@ -208,7 +230,7 @@ class YouTubeDownloader:
 
         return None
 
-    def _get_metadata_for_existing_file(self, url: str, audio_file: Path) -> Dict[str, str]:
+    def _get_metadata_for_existing_file(self, url: str, audio_file: Path) -> Dict[str, Any]:
         """
         Get video metadata without downloading (for existing files).
 
@@ -222,44 +244,25 @@ class YouTubeDownloader:
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
+            'noplaylist': True,
         }
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
-
-                # Sanitize title for safe handling
-                title = info.get('title', 'Unknown')
-                try:
-                    title.encode('utf-8')
-                except (UnicodeEncodeError, UnicodeDecodeError, AttributeError):
-                    title = 'Video'
-
-                result = {
-                    'title': title,
-                    'duration': info.get('duration', 0),
-                    'uploader': info.get('uploader', 'Unknown'),
-                    'upload_date': info.get('upload_date', 'Unknown'),
-                    'description': info.get('description', ''),
-                    'view_count': info.get('view_count', 0),
-                    'like_count': info.get('like_count', 0),
-                    'channel_url': info.get('channel_url', ''),
-                    'tags': info.get('tags', []),
-                    'categories': info.get('categories', []),
-                    'chapters': info.get('chapters', []),
-                    'language': info.get('language', ''),
-                    'audio_file': str(audio_file),
-                    'url': url
-                }
-
-                return result
+                return self._build_metadata(info, audio_file, url)
 
         except Exception as e:
             raise Exception(f"Failed to get video metadata: {str(e)}")
 
-    def is_playlist(self, url: str) -> bool:
+    @staticmethod
+    def is_playlist(url: str) -> bool:
         """
-        Check if URL is a playlist.
+        Check if URL refers to a playlist rather than a single video.
+
+        A watch URL that merely carries a `list=` parameter (a video opened
+        from within a playlist) counts as a single video - only /playlist
+        URLs or `list=` without a video ID are treated as playlists.
 
         Args:
             url: YouTube URL
@@ -267,7 +270,16 @@ class YouTubeDownloader:
         Returns:
             True if URL is a playlist, False otherwise
         """
-        return 'playlist' in url.lower() or 'list=' in url
+        try:
+            parsed = urlparse(url)
+        except ValueError:
+            return False
+
+        if '/playlist' in parsed.path.lower():
+            return True
+
+        query = parse_qs(parsed.query)
+        return 'list' in query and 'v' not in query
 
     def get_playlist_videos(self, url: str) -> list:
         """

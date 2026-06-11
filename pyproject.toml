@@ -1,6 +1,6 @@
 [project]
 name = "sonopsis"
-version = "0.1.0"
+version = "0.2.0"
 description = "Video/audio summariser - download, transcribe with Whisper/ElevenLabs, and generate AI summaries"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -8,16 +8,22 @@ dependencies = [
     "yt-dlp>=2024.0.0",
     "openai>=1.0.0",
     "anthropic>=0.25.0",
-    "rich>=13.0.0",
     "pyyaml>=6.0.0",
     "python-dotenv>=1.0.0",
+    "colorama>=0.4.6",
 ]
+
+[tool.setuptools]
+# Top-level entry-point modules; prose/ prompt files resolve relative to the
+# repo so the tool is installed editable (see [tool.forma].install)
+py-modules = ["main", "sonopsis"]
 
 [tool.setuptools.packages.find]
 include = ["utils*"]
 
 [project.scripts]
 sonopsis = "main:main"
+sonopsis-tui = "sonopsis:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
@@ -28,6 +34,13 @@ testpaths = ["tests"]
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]
+# Local transcription (torch CPU wheels; ~2GB on disk). Install: uv sync --extra whisper
+whisper = ["openai-whisper>=20231117", "torch>=2.0.0", "torchaudio>=2.0.0"]
+# Cloud transcription. Install: uv sync --extra elevenlabs
+elevenlabs = ["elevenlabs>=1.0.0"]
+# NVIDIA Parakeet local transcription via ONNX (~70MB deps + ~670MB int8 model
+# on first use; no PyTorch). Install: uv sync --extra parakeet
+parakeet = ["onnx-asr[cpu,hub]>=0.10.0"]
 
 [tool.forma]
 description = "Video/audio summariser - download, transcribe with Whisper/ElevenLabs, and generate AI summaries"
@@ -39,4 +52,4 @@ env-key = "OPENAI_API_KEY"
 api-url = "https://platform.openai.com/docs"
 setup-notes = "Requires OpenAI API key for Whisper transcription and GPT/Claude for summaries"
 maturity = "experimental"
-e2e_tests = 0
+e2e_tests = 2

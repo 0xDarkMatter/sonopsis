@@ -4,10 +4,37 @@ Generates well-formatted summaries and notes using OpenAI's GPT models or Anthro
 """
 
 import os
+import re
+import json
+import time
+import random
+import shutil
+import subprocess
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 from openai import OpenAI
 from datetime import datetime
+
+from utils.models import get_max_tokens
+
+# Transient API failures (rate limits, overload, network blips) are retried
+# with exponential backoff. The transcript feeding a summary can represent
+# 20+ minutes of transcription work - one 529 should not throw that away.
+MAX_API_ATTEMPTS = 3
+RETRY_BASE_DELAY = 5.0  # seconds
+
+_TRANSIENT_ERROR_NAMES = {
+    "RateLimitError", "APIConnectionError", "APITimeoutError",
+    "InternalServerError", "OverloadedError", "ServiceUnavailableError",
+}
+
+
+def _is_transient(error: Exception) -> bool:
+    """Whether an API error is worth retrying (rate limit, 5xx, network)."""
+    if type(error).__name__ in _TRANSIENT_ERROR_NAMES:
+        return True
+    status = getattr(error, "status_code", None)
+    return status is not None and (status == 429 or status >= 500)
 
 # Try to import Anthropic, but make it optional
 try:
@@ -15,6 +42,11 @@ try:
     ANTHROPIC_AVAILABLE = True
 except ImportError:
     ANTHROPIC_AVAILABLE = False
+
+
+def claude_cli_available() -> bool:
+    """Check whether the Claude Code CLI is installed and on PATH."""
+    return shutil.which("claude") is not None
 
 
 class ContentSummarizer:
@@ -30,6 +62,8 @@ class ContentSummarizer:
                    - OpenAI: gpt-4o-mini, gpt-4o, gpt-5.1
                    - Anthropic: claude-sonnet-4-5-20250929, claude-haiku-4-5-20251001, claude-sonnet-4, claude-opus-4-1
                    - OpenRouter: openrouter/moonshot/kimi-k2, openrouter/zhipuai/glm-4.6-plus
+                   - Claude Code CLI (subscription, no API key): claude-cli,
+                     claude-cli/sonnet, claude-cli/opus, claude-cli/haiku
             output_dir: Directory to save summaries
         """
         self.model = model
@@ -37,7 +71,21 @@ class ContentSummarizer:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         # Determine which API to use based on model name
-        if model.startswith('claude'):
+        if model.startswith('claude-cli'):
+            # Headless Claude Code - billed to the user's subscription (Pro/Max),
+            # not an API key, so no key check needed.
+            self.api_type = 'claude-cli'
+            self.cli_path = shutil.which("claude")
+            if not self.cli_path:
+                raise ValueError(
+                    "Claude Code CLI not found on PATH. Install it from "
+                    "https://claude.com/claude-code or choose an API model instead."
+                )
+            # Optional model alias after a slash: claude-cli/sonnet -> sonnet
+            self.cli_model = model.split('/', 1)[1] if '/' in model else None
+            self.api_key = None
+            self.client = None
+        elif model.startswith('claude'):
             if not ANTHROPIC_AVAILABLE:
                 raise ImportError("Anthropic package not installed. Run: pip install anthropic")
             self.api_type = 'anthropic'
@@ -68,7 +116,7 @@ class ContentSummarizer:
                 raise ValueError("OpenAI API key not found. Set OPENAI_API_KEY environment variable.")
             self.client = OpenAI(api_key=self.api_key)
 
-    def summarize(self, transcript: str, video_metadata: Dict[str, any],
+    def summarize(self, transcript: str, video_metadata: Dict[str, Any],
                   analysis_mode: str = "advanced", transcription_engine: str = "whisper") -> Dict[str, str]:
         """
         Generate a comprehensive summary and notes from a transcript.
@@ -94,57 +142,7 @@ class ContentSummarizer:
         prompt = self._create_summary_prompt(transcript, video_metadata, analysis_mode)
 
         try:
-            # Call appropriate API based on model type
-            if self.api_type == 'anthropic':
-                # Claude requires max_tokens parameter - use model maximum
-                # Sonnet 4.5 supports up to 64K output tokens
-                # Use streaming to avoid 10-minute timeout for long generations
-                print(f"[*] Generating (this may take several minutes for long videos)...")
-
-                summary_content = ""
-                with self.client.messages.stream(
-                    model=self.model,
-                    max_tokens=64000,  # Claude Sonnet 4.5 maximum output capacity
-                    temperature=0.7,
-                    system=system_prompt,
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": prompt
-                        }
-                    ]
-                ) as stream:
-                    for text in stream.text_stream:
-                        summary_content += text
-            else:
-                # OpenAI API (also used by OpenRouter with compatible interface)
-                completion_params = {
-                    "model": self.model,
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": system_prompt
-                        },
-                        {
-                            "role": "user",
-                            "content": prompt
-                        }
-                    ],
-                    "temperature": 0.7
-                }
-
-                # For OpenAI models, max_tokens is optional
-                # If omitted, model uses its full output capacity
-                # Only set for reasoning models that require it
-                if self.model.startswith('o1') or self.model.startswith('o3'):
-                    # Reasoning models require max_completion_tokens and temperature=1
-                    completion_params["max_completion_tokens"] = 32768  # o1 supports up to 100k
-                    completion_params["temperature"] = 1
-                # For GPT-4o, GPT-5, and OpenRouter models: don't limit output tokens
-                # Let the model use its full capacity
-
-                response = self.client.chat.completions.create(**completion_params)
-                summary_content = response.choices[0].message.content
+            summary_content = self._generate_with_retry(system_prompt, prompt)
 
             # Generate formatted output
             formatted_output = self._format_output(summary_content, video_metadata)
@@ -174,6 +172,130 @@ class ContentSummarizer:
         except Exception as e:
             raise Exception(f"Summarization failed: {str(e)}")
 
+    def _generate_with_retry(self, system_prompt: str, prompt: str) -> str:
+        """Run generation, retrying transient API failures with backoff."""
+        last_error = None
+        for attempt in range(1, MAX_API_ATTEMPTS + 1):
+            try:
+                return self._generate_once(system_prompt, prompt)
+            except Exception as e:
+                last_error = e
+                if attempt == MAX_API_ATTEMPTS or not _is_transient(e):
+                    raise
+                delay = RETRY_BASE_DELAY * (2 ** (attempt - 1)) + random.uniform(0, 1)
+                print(f"[!] Transient API error ({type(e).__name__}); "
+                      f"retry {attempt}/{MAX_API_ATTEMPTS - 1} in {delay:.0f}s...")
+                time.sleep(delay)
+        raise last_error or RuntimeError("Summary generation failed")  # unreachable
+
+    def _generate_once(self, system_prompt: str, prompt: str) -> str:
+        """Single generation attempt against the configured backend."""
+        if self.api_type == 'claude-cli':
+            print(f"[*] Generating via Claude Code CLI (subscription, no API cost)...")
+            return self._summarize_with_claude_cli(system_prompt, prompt)
+
+        if self.api_type == 'anthropic':
+            # Claude requires max_tokens - use the model's maximum from the
+            # registry. Streaming avoids the 10-minute HTTP timeout on long
+            # generations. No temperature: newer Opus models reject the
+            # parameter entirely, and the default works well for summaries.
+            print(f"[*] Generating (this may take several minutes for long videos)...")
+
+            summary_content = ""
+            with self.client.messages.stream(
+                model=self.model,
+                max_tokens=get_max_tokens(self.model),
+                system=system_prompt,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ]
+            ) as stream:
+                for text in stream.text_stream:
+                    summary_content += text
+            return summary_content
+
+        # OpenAI API (also used by OpenRouter with compatible interface)
+        completion_params = {
+            "model": self.model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": system_prompt
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            "temperature": 0.7
+        }
+
+        # For OpenAI models, max_tokens is optional - if omitted, the model
+        # uses its full output capacity. Reasoning models require
+        # max_completion_tokens and temperature=1.
+        if self.model.startswith('o1') or self.model.startswith('o3'):
+            completion_params["max_completion_tokens"] = 32768
+            completion_params["temperature"] = 1
+
+        response = self.client.chat.completions.create(**completion_params)
+        return response.choices[0].message.content
+
+    def _summarize_with_claude_cli(self, system_prompt: str, prompt: str) -> str:
+        """
+        Generate a summary via the Claude Code CLI in headless mode.
+
+        Uses the user's Claude subscription (Pro/Max) instead of API billing.
+        The full payload goes through stdin: transcripts routinely exceed the
+        Windows ~32K command-line limit, and long arguments through the npm
+        .cmd shim are mangled by cmd.exe quoting rules.
+        """
+        cmd = [
+            self.cli_path,
+            '-p', 'You will receive a system prompt followed by a task. '
+                  'Follow them exactly and output only the requested summary markdown.',
+            '--output-format', 'json',
+            '--disallowedTools', 'Bash,Edit,Write,Read,Glob,Grep,WebFetch,WebSearch,Task',
+        ]
+        if self.cli_model:
+            cmd += ['--model', self.cli_model]
+
+        payload = f"<system>\n{system_prompt}\n</system>\n\n{prompt}"
+
+        try:
+            result = subprocess.run(
+                cmd,
+                input=payload,
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                timeout=3600,
+            )
+        except FileNotFoundError:
+            raise Exception("Claude Code CLI not found. Install from https://claude.com/claude-code")
+        except subprocess.TimeoutExpired:
+            raise Exception("Claude Code CLI timed out after 60 minutes")
+
+        if result.returncode != 0:
+            stderr_snippet = (result.stderr or result.stdout or '').strip()[:300]
+            raise Exception(f"Claude Code CLI failed (exit {result.returncode}): {stderr_snippet}")
+
+        try:
+            response = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            raise Exception(f"Claude Code CLI returned unparseable output: {result.stdout[:300]}")
+
+        if response.get('is_error'):
+            raise Exception(f"Claude Code CLI error: {response.get('result', 'unknown error')[:300]}")
+
+        summary = response.get('result', '')
+        if not summary or not summary.strip():
+            raise Exception("Claude Code CLI returned an empty summary")
+
+        return summary
+
     def _load_system_prompt(self) -> str:
         """
         Load the system prompt from external file.
@@ -190,7 +312,7 @@ class ContentSummarizer:
         with open(system_prompt_file, 'r', encoding='utf-8') as f:
             return f.read().strip()
 
-    def _identify_speakers(self, transcript: str, metadata: Dict[str, any]) -> str:
+    def _identify_speakers(self, transcript: str, metadata: Dict[str, Any]) -> str:
         """
         Analyze transcript and metadata to identify speakers.
 
@@ -251,7 +373,7 @@ class ContentSummarizer:
 
         return mapping_prompt
 
-    def _create_summary_prompt(self, transcript: str, metadata: Dict[str, any],
+    def _create_summary_prompt(self, transcript: str, metadata: Dict[str, Any],
                                analysis_mode: str = "advanced") -> str:
         """
         Create the prompt for GPT by loading from external file.
@@ -276,7 +398,7 @@ class ContentSummarizer:
 
         # Extract video ID from URL
         url = metadata.get('url', 'N/A')
-        video_id = self._extract_video_id(url) if url != 'N/A' else 'N/A'
+        video_id = self._extract_video_id(url) or 'N/A'
 
         # Generate speaker mapping assistance
         speaker_mapping = self._identify_speakers(transcript, metadata)
@@ -297,7 +419,7 @@ class ContentSummarizer:
 
         return prompt
 
-    def _format_output(self, summary: str, metadata: Dict[str, any]) -> str:
+    def _format_output(self, summary: str, metadata: Dict[str, Any]) -> str:
         """Format the final output with metadata header."""
         # Format transcription model display name
         transcription_display = self._get_transcription_display_name(
@@ -440,20 +562,22 @@ class ContentSummarizer:
         return f"{num:,}"
 
     @staticmethod
-    def _extract_video_id(url: str) -> str:
-        """Extract YouTube video ID from URL."""
-        try:
-            # Handle different YouTube URL formats
-            if 'youtu.be/' in url:
-                # Format: https://youtu.be/VIDEO_ID
-                return url.split('youtu.be/')[-1].split('?')[0]
-            elif 'watch?v=' in url:
-                # Format: https://www.youtube.com/watch?v=VIDEO_ID
-                return url.split('watch?v=')[-1].split('&')[0]
-            else:
-                return 'N/A'
-        except:
-            return 'N/A'
+    def _extract_video_id(url: str) -> Optional[str]:
+        """
+        Extract YouTube video ID from URL.
+
+        Returns None when no ID is found - never a placeholder string, since
+        the ID is embedded in output filenames ('N/A' would inject a slash).
+        """
+        patterns = [
+            r'(?:youtube\.com/watch\?(?:[^#]*&)?v=|youtu\.be/)([a-zA-Z0-9_-]{11})',
+            r'youtube\.com/(?:embed|v|shorts|live)/([a-zA-Z0-9_-]{11})',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, url)
+            if match:
+                return match.group(1)
+        return None
 
     @staticmethod
     def _sanitize_filename(filename: str) -> str:

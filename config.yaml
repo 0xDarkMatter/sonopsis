@@ -3,14 +3,17 @@
 
 # Default models (can be overridden via CLI)
 defaults:
-  # Summarization model: gpt-4o-mini, gpt-4o, gpt-5.1, claude-haiku-4-5-20251001, claude-sonnet-4-5-20250929
-  summary_model: claude-sonnet-4-5-20250929
+  # Summarization model. Options: claude-cli (Claude subscription, no API key),
+  # claude-sonnet-4-6, claude-haiku-4-5-20251001, claude-opus-4-8,
+  # gpt-4o-mini, gpt-4o, gpt-5.1, openrouter/moonshot/kimi-k2
+  # Leave unset (~) to auto-select: claude-cli when installed, else claude-sonnet-4-6
+  summary_model: ~
 
   # Whisper model: tiny, base, small, medium, large
   whisper_model: base
 
   # Transcription engine: whisper, whisperx, elevenlabs
-  transcription_engine: whisper
+  transcription_engine: ~  # auto: parakeet if installed, else whisper
 
   # Analysis mode: basic, advanced
   analysis_mode: basic

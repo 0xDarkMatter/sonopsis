@@ -20,7 +20,7 @@
 | `main.py` | CLI interface for scripting/automation |
 | `utils/downloader.py` | YouTube download via yt-dlp |
 | `utils/transcriber.py` | Multi-engine transcription (Whisper, WhisperX, ElevenLabs) |
-| `utils/summarizer.py` | LLM summarization (OpenAI, Anthropic, OpenRouter) |
+| `utils/summarizer.py` | LLM summarization (OpenAI, Anthropic, OpenRouter, Claude Code CLI) |
 
 ## LLM Artifacts (prose/)
 
@@ -47,7 +47,7 @@ All prompts and templates live in `prose/`:
 - Use kebab-case for new files
 
 ### Code Style
-- Python 3.8+ compatible
+- Python 3.11+ compatible
 - Type hints for function signatures
 - Docstrings for public functions
 - External prompts in `prose/` (not hardcoded strings)
@@ -98,6 +98,7 @@ External services required:
 - YouTube (video source)
 - OpenAI API (optional, for GPT models)
 - Anthropic API (optional, for Claude models)
+- Claude Code CLI (optional, `claude-cli*` models - summarizes on the user's Claude subscription, no API key)
 - OpenRouter API (optional, for Kimi/GLM models)
 - ElevenLabs API (optional, for cloud transcription)
 - Hugging Face (optional, for WhisperX speaker diarization)

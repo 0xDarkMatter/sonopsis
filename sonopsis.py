@@ -12,21 +12,31 @@ from colorama import init, Fore, Style
 # Set UTF-8 encoding for Windows console
 if sys.platform == 'win32':
     os.environ['PYTHONIOENCODING'] = 'utf-8'
-    # Reconfigure stdout/stderr for UTF-8
-    import io
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
         sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
+from utils.config import default_engine, load_config
 from utils.downloader import YouTubeDownloader
-from utils.transcriber import AudioTranscriber
-from utils.summarizer import ContentSummarizer
+from utils.models import MODELS, available_models
+from utils.pipeline import engine_display_name, process_video
+from utils.summarizer import claude_cli_available
+
+# Arrow-key menus need msvcrt (Windows-only); everywhere else we fall back
+# to numbered input so the interactive mode still works on macOS/Linux
+try:
+    import msvcrt
+    HAS_MSVCRT = True
+except ImportError:
+    HAS_MSVCRT = False
 
 # Initialize colorama
 init(autoreset=True)
 
 # Load environment variables
 load_dotenv(override=True)  # .env takes precedence over system env vars
+
+CONFIG = load_config()
 
 
 def print_banner():
@@ -75,13 +85,6 @@ def print_banner():
     print(f"{Fore.CYAN}{border_bottom}{Style.RESET_ALL}\n")
 
 
-def print_header():
-    """Print application header."""
-    print(f"\n{Fore.CYAN}{'='*70}")
-    print(f"{Fore.CYAN}      Sonopsis - Interactive Mode")
-    print(f"{Fore.CYAN}{'='*70}\n{Style.RESET_ALL}")
-
-
 def print_section_header(title):
     """Print a section header."""
     print(f"\n{Fore.YELLOW}{'-'*70}")
@@ -89,9 +92,28 @@ def print_section_header(title):
     print(f"{Fore.YELLOW}{'-'*70}{Style.RESET_ALL}\n")
 
 
+def _show_menu_numbered(title, menu_items, default_selected=0):
+    """Cross-platform fallback menu: numbered list with input()."""
+    print(f"\n{Fore.CYAN}{'─'*70}")
+    print(f"{Fore.CYAN}{title}")
+    print(f"{Fore.CYAN}{'─'*70}{Style.RESET_ALL}")
+    for i, item in enumerate(menu_items):
+        marker = " (default)" if i == default_selected else ""
+        print(f"{Fore.GREEN}[{i+1}]{Style.RESET_ALL} {item}{Fore.YELLOW}{marker}{Style.RESET_ALL}")
+
+    while True:
+        choice = input(f"\n{Fore.CYAN}Select (1-{len(menu_items)}) [default: {default_selected + 1}]: {Style.RESET_ALL}").strip()
+        if not choice:
+            return default_selected
+        if choice.isdigit() and 1 <= int(choice) <= len(menu_items):
+            return int(choice) - 1
+        print(f"{Fore.RED}[!] Invalid choice. Enter 1-{len(menu_items)}.{Style.RESET_ALL}")
+
+
 def show_menu(title, menu_items, default_selected=0):
-    """Generic menu with keyboard navigation."""
-    import msvcrt
+    """Generic menu with keyboard navigation (numbered fallback off-Windows)."""
+    if not HAS_MSVCRT or not sys.stdin.isatty():
+        return _show_menu_numbered(title, menu_items, default_selected)
 
     width = 100
     selected = default_selected
@@ -191,8 +213,10 @@ def select_whisper_model_menu():
         "medium - Slow, 1.5GB, Excellent quality",
         "large - Slowest, 3GB, Best quality"
     ]
-    selected = show_menu("Select Whisper Model", menu_items, default_selected=1)  # Default to base
     models = ['tiny', 'base', 'small', 'medium', 'large']
+    config_default = CONFIG['defaults'].get('whisper_model', 'base')
+    default_idx = models.index(config_default) if config_default in models else 1
+    selected = show_menu("Select Whisper Model", menu_items, default_selected=default_idx)
     return models[selected]
 
 
@@ -282,20 +306,40 @@ def prompt_for_hf_token():
 
 def select_transcription_mode_menu():
     """Interactive transcription mode selection menu."""
-    import torch
+    # torch is an optional extra (uv sync --extra whisper); without it only
+    # ElevenLabs cloud transcription is usable
+    try:
+        import torch
+        has_torch = True
+        has_gpu = torch.cuda.is_available()
+    except ImportError:
+        has_torch = False
+        has_gpu = False
+
+    try:
+        import onnx_asr  # noqa: F401
+        has_parakeet = True
+    except ImportError:
+        has_parakeet = False
 
     has_hf_token = bool(os.getenv("HF_TOKEN"))
     has_elevenlabs_key = bool(os.getenv("ELEVENLABS_API_KEY"))
-    has_gpu = torch.cuda.is_available()
+    has_openai_key = bool(os.getenv("OPENAI_API_KEY"))
 
     menu_items = [
-        "Whisper - Local transcription (free, no speaker labels)",
-        "WhisperX - Local with speaker diarization (free)" + ("" if has_hf_token else " [Requires HF_TOKEN]"),
-        "ElevenLabs - Cloud transcription (paid, 99 languages, speaker diarization)" + ("" if has_elevenlabs_key else " [Requires API Key]")
+        "Whisper - Local transcription (free, no speaker labels)" + ("" if has_torch else " [Requires: uv sync --extra whisper]"),
+        "WhisperX - Local with speaker diarization (free)" + ("" if has_hf_token else " [Requires HF_TOKEN]") + ("" if has_torch else " [Requires: uv sync --extra whisper]"),
+        "Parakeet - Local, beats Whisper accuracy, no PyTorch (free)" + ("" if has_parakeet else " [Requires: uv sync --extra parakeet]"),
+        "ElevenLabs - Cloud transcription (paid, 99 languages, speaker diarization)" + ("" if has_elevenlabs_key else " [Requires API Key]"),
+        "OpenAI - Cloud gpt-4o-transcribe with speaker diarization (paid)" + ("" if has_openai_key else " [Requires OPENAI_API_KEY]")
     ]
 
     # Show performance info
-    if not has_gpu:
+    if not has_torch:
+        print(f"\n{Fore.YELLOW}Note: PyTorch/Whisper not installed - local transcription unavailable{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}      Install with: uv sync --extra whisper{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}      Or use ElevenLabs for cloud transcription (no local models needed){Style.RESET_ALL}\n")
+    elif not has_gpu:
         print(f"\n{Fore.YELLOW}Note: No GPU detected - running on CPU{Style.RESET_ALL}")
         print(f"{Fore.YELLOW}      WhisperX will be 3-5x slower than Whisper on CPU{Style.RESET_ALL}")
         print(f"{Fore.YELLOW}      Recommend: Use vanilla Whisper for faster local transcription{Style.RESET_ALL}")
@@ -303,34 +347,27 @@ def select_transcription_mode_menu():
     else:
         print(f"\n{Fore.GREEN}GPU detected - WhisperX will run efficiently{Style.RESET_ALL}\n")
 
-    selected = show_menu("Select Transcription Engine", menu_items, default_selected=0)  # Default to Whisper
+    engines = ["whisper", "whisperx", "parakeet", "elevenlabs", "openai"]
+    config_default = default_engine(CONFIG['defaults'].get('transcription_engine'))
+    default_idx = engines.index(config_default) if config_default in engines else 0
+    selected = show_menu("Select Transcription Engine", menu_items, default_selected=default_idx)
+    engine = engines[selected]
 
-    # Map selection to engine name
-    if selected == 0:
-        engine = "whisper"
-    elif selected == 1:
-        engine = "whisperx"
+    if engine == "whisperx" and not has_hf_token:
         # If WhisperX selected but no token, prompt for it
-        if not has_hf_token:
-            token = prompt_for_hf_token()
-            # Token is now saved and env reloaded, continue with WhisperX
-    else:  # selected == 2
-        engine = "elevenlabs"
-        # If ElevenLabs selected but no API key, show warning
-        if not has_elevenlabs_key:
-            print(f"\n{Fore.YELLOW}{'='*70}")
-            print(f"{Fore.YELLOW}[!] ElevenLabs API Key Required{Style.RESET_ALL}")
-            print(f"{Fore.YELLOW}{'='*70}{Style.RESET_ALL}\n")
-            print(f"{Fore.CYAN}To use ElevenLabs transcription:{Style.RESET_ALL}")
-            print(f"{Fore.CYAN}1. Sign up at: https://elevenlabs.io{Style.RESET_ALL}")
-            print(f"{Fore.CYAN}2. Get your API key from the dashboard{Style.RESET_ALL}")
-            print(f"{Fore.CYAN}3. Add to .env file: ELEVENLABS_API_KEY=your_key_here{Style.RESET_ALL}\n")
-            print(f"{Fore.YELLOW}Transcription will fail without a valid API key.{Style.RESET_ALL}")
-            print(f"{Fore.YELLOW}Press any key to continue anyway...{Style.RESET_ALL}")
-            import msvcrt
-            msvcrt.getch()
+        prompt_for_hf_token()
+    elif engine == "elevenlabs" and not has_elevenlabs_key:
+        print(f"\n{Fore.YELLOW}{'='*70}")
+        print(f"{Fore.YELLOW}[!] ElevenLabs API Key Required{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}{'='*70}{Style.RESET_ALL}\n")
+        print(f"{Fore.CYAN}To use ElevenLabs transcription:{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}1. Sign up at: https://elevenlabs.io{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}2. Get your API key from the dashboard{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}3. Add to .env file: ELEVENLABS_API_KEY=your_key_here{Style.RESET_ALL}\n")
+        print(f"{Fore.YELLOW}Transcription will fail without a valid API key.{Style.RESET_ALL}")
+        input(f"{Fore.YELLOW}Press ENTER to continue anyway...{Style.RESET_ALL}")
 
-    return engine  # Returns "whisper", "whisperx", or "elevenlabs"
+    return engine
 
 
 def select_analysis_mode_menu():
@@ -339,47 +376,38 @@ def select_analysis_mode_menu():
         "Basic - Quick summary with key topics and quotes (5 sections)",
         "Advanced - Comprehensive analysis with detailed notes (9 sections)"
     ]
-    selected = show_menu("Select Analysis Mode", menu_items, default_selected=0)  # Default to Basic
     modes = ['basic', 'advanced']
+    config_default = CONFIG['defaults'].get('analysis_mode', 'basic')
+    default_idx = modes.index(config_default) if config_default in modes else 0
+    selected = show_menu("Select Analysis Mode", menu_items, default_selected=default_idx)
     return modes[selected]
 
 
 def select_summary_model_menu():
-    """Interactive AI model selection menu."""
-    has_openai = bool(os.getenv("OPENAI_API_KEY"))
-    has_anthropic = bool(os.getenv("ANTHROPIC_API_KEY"))
+    """Interactive AI model selection menu, driven by the model registry."""
+    has_claude_cli = claude_cli_available()
+    model_ids = available_models(claude_cli=has_claude_cli)
 
-    menu_items = []
-    models = []
-
-    if has_openai:
-        menu_items.append("GPT-4o-mini - Fast, Budget-friendly")
-        models.append('gpt-4o-mini')
-        menu_items.append("GPT-4o - Balanced, Great quality")
-        models.append('gpt-4o')
-        menu_items.append("GPT-5 - PhD-level, Most accurate")
-        models.append('gpt-5')
-
-    if has_anthropic:
-        menu_items.append("Claude Haiku 4.5 - Best value, Fast")
-        models.append('claude-haiku-4-5-20251001')
-        menu_items.append("Claude Sonnet 4.5 - Top quality")
-        models.append('claude-sonnet-4-5-20250929')
-
-    if not menu_items:
-        print(f"{Fore.MAGENTA}No API keys found! Please add OPENAI_API_KEY or ANTHROPIC_API_KEY to .env{Style.RESET_ALL}")
+    if not model_ids:
+        print(f"{Fore.MAGENTA}No summarization backend found!{Style.RESET_ALL}")
+        print(f"{Fore.MAGENTA}Add OPENAI_API_KEY, ANTHROPIC_API_KEY or OPENROUTER_API_KEY to .env, "
+              f"or install the Claude Code CLI.{Style.RESET_ALL}")
         sys.exit(1)
 
-    # Default to Claude Haiku if available, otherwise first option
+    menu_items = []
+    for model_id in model_ids:
+        info = MODELS[model_id]
+        menu_items.append(f"{info['label']} - {info['quality']}, {info['speed']}, {info['cost']}")
+
+    # Default: Claude Code CLI if installed (subscription, no API cost),
+    # else the configured default model, else the first option
     default_idx = 0
-    if has_anthropic:
-        for i, model in enumerate(models):
-            if 'haiku' in model:
-                default_idx = i
-                break
+    config_default = CONFIG['defaults'].get('summary_model')
+    if not has_claude_cli and config_default in model_ids:
+        default_idx = model_ids.index(config_default)
 
     selected = show_menu("Select AI Model", menu_items, default_selected=default_idx)
-    return models[selected]
+    return model_ids[selected]
 
 
 def get_youtube_url_menu():
@@ -409,328 +437,13 @@ def get_youtube_url_menu():
         print(f"{Fore.MAGENTA}Invalid URL. Please enter a valid YouTube URL.{Style.RESET_ALL}")
 
 
-def get_youtube_url():
-    """Get YouTube URL from user."""
-    print_section_header("Step 1: YouTube Video/Playlist URL")
-
-    while True:
-        url = input(f"{Fore.WHITE}Enter YouTube URL or Playlist URL (or 'q' to quit): {Style.RESET_ALL}").strip()
-
-        if url.lower() == 'q':
-            print(f"\n{Fore.YELLOW}Exiting...{Style.RESET_ALL}")
-            sys.exit(0)
-
-        if 'youtube.com' in url or 'youtu.be' in url:
-            return url
-
-        print(f"{Fore.RED}[!] Invalid URL. Please enter a valid YouTube URL.{Style.RESET_ALL}\n")
-
-
-def select_whisper_model():
-    """Interactive Whisper model selection."""
-    print_section_header("Step 2: Select Whisper Transcription Model")
-
-    models = {
-        '1': {
-            'name': 'tiny',
-            'size': '~75 MB',
-            'speed': 'Fastest',
-            'quality': 'Good',
-            'desc': 'Multilingual speech recognition, good for podcasts and interviews',
-            'icon': '[FAST]',
-            'color': Fore.YELLOW
-        },
-        '2': {
-            'name': 'base',
-            'size': '~150 MB',
-            'speed': 'Fast',
-            'quality': 'Better',
-            'desc': 'Balanced accuracy and speed, handles most accents well',
-            'icon': '[RECOMMENDED]',
-            'color': Fore.GREEN
-        },
-        '3': {
-            'name': 'small',
-            'size': '~500 MB',
-            'speed': 'Medium',
-            'quality': 'Great',
-            'desc': 'Better for technical content, reduces word errors significantly',
-            'icon': '[QUALITY]',
-            'color': Fore.CYAN
-        },
-        '4': {
-            'name': 'medium',
-            'size': '~1.5 GB',
-            'speed': 'Slow',
-            'quality': 'Excellent',
-            'desc': 'Professional quality, excellent for medical/legal transcriptions',
-            'icon': '[PRO]',
-            'color': Fore.MAGENTA
-        },
-        '5': {
-            'name': 'large',
-            'size': '~3 GB',
-            'speed': 'Slowest',
-            'quality': 'Best',
-            'desc': 'Maximum accuracy, handles difficult audio and heavy accents',
-            'icon': '[MAX]',
-            'color': Fore.RED
-        },
-    }
-
-    print(f"\n{Fore.CYAN}{'='*70}{Style.RESET_ALL}")
-    print(f"{Fore.CYAN}  WHISPER TRANSCRIPTION MODELS{Style.RESET_ALL}")
-    print(f"{Fore.CYAN}{'='*70}{Style.RESET_ALL}\n")
-
-    for key, info in models.items():
-        # Model name line with icon
-        icon_colored = f"{info['color']}{info['icon']}{Style.RESET_ALL}"
-        print(f"{Fore.GREEN}[{key}]{Style.RESET_ALL} {Fore.WHITE}{Style.BRIGHT}{info['name'].upper():<8}{Style.RESET_ALL} {icon_colored}")
-
-        # Stats line
-        print(f"    {Fore.CYAN}Size:{Style.RESET_ALL} {info['size']:<10} "
-              f"{Fore.CYAN}Speed:{Style.RESET_ALL} {info['speed']:<8} "
-              f"{Fore.CYAN}Quality:{Style.RESET_ALL} {info['quality']}")
-
-        # Description
-        print(f"    {Fore.WHITE}{info['desc']}{Style.RESET_ALL}\n")
-
-    # Check cache for already downloaded models
-    default_cache = Path.home() / ".cache" / "whisper"
-    cache_dir = Path(os.getenv("WHISPER_CACHE_DIR", str(default_cache)))
-    if cache_dir.exists():
-        downloaded = [f.stem for f in cache_dir.glob('*.pt')]
-        if downloaded:
-            print(f"{Fore.GREEN}[CACHE]{Style.RESET_ALL} Already downloaded: {Fore.YELLOW}{', '.join(downloaded)}{Style.RESET_ALL}")
-            print(f"        Location: {Fore.CYAN}{cache_dir}{Style.RESET_ALL}\n")
-
-    while True:
-        choice = input(f"\n{Fore.WHITE}Select model (1-5) [default: 2 - base]: {Style.RESET_ALL}").strip()
-
-        if not choice:
-            choice = '2'
-
-        if choice in models:
-            selected = models[choice]
-            print(f"{Fore.GREEN}[+] Selected: {selected['name']} model{Style.RESET_ALL}")
-            return selected['name']
-
-        print(f"{Fore.RED}[!] Invalid choice. Please enter 1-5.{Style.RESET_ALL}")
-
-
-def select_summary_model():
-    """Interactive AI model selection for summarization."""
-    print_section_header("Step 3: Select AI Summarization Model")
-
-    # Check which API keys are available
-    has_openai = bool(os.getenv("OPENAI_API_KEY"))
-    has_anthropic = bool(os.getenv("ANTHROPIC_API_KEY"))
-
-    models = {}
-    model_num = 1
-
-    if has_openai:
-        print(f"\n{Fore.YELLOW}{'='*70}{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}  OPENAI MODELS{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}{'='*70}{Style.RESET_ALL}\n")
-
-        # GPT-4o-mini
-        models[str(model_num)] = {'name': 'gpt-4o-mini', 'provider': 'OpenAI',
-                                   'cost': '$0.05', 'speed': 'Fastest', 'quality': 'Good',
-                                   'desc': 'Budget-friendly, great for simple summaries and quick overviews'}
-        print(f"{Fore.GREEN}[{model_num}]{Style.RESET_ALL} {Fore.WHITE}{Style.BRIGHT}GPT-4O-MINI{Style.RESET_ALL} "
-              f"{Fore.GREEN}[BUDGET]{Style.RESET_ALL}")
-        print(f"    {Fore.CYAN}Speed:{Style.RESET_ALL} Fastest    {Fore.CYAN}Cost:{Style.RESET_ALL} ~$0.05    {Fore.CYAN}Quality:{Style.RESET_ALL} Good")
-        print(f"    {Fore.WHITE}{models[str(model_num)]['desc']}{Style.RESET_ALL}\n")
-        model_num += 1
-
-        # GPT-4o
-        models[str(model_num)] = {'name': 'gpt-4o', 'provider': 'OpenAI',
-                                   'cost': '$0.15', 'speed': 'Fast', 'quality': 'Great',
-                                   'desc': 'Balanced model, good analysis and structured summaries'}
-        print(f"{Fore.GREEN}[{model_num}]{Style.RESET_ALL} {Fore.WHITE}{Style.BRIGHT}GPT-4O{Style.RESET_ALL} "
-              f"{Fore.CYAN}[BALANCED]{Style.RESET_ALL}")
-        print(f"    {Fore.CYAN}Speed:{Style.RESET_ALL} Fast       {Fore.CYAN}Cost:{Style.RESET_ALL} ~$0.15    {Fore.CYAN}Quality:{Style.RESET_ALL} Great")
-        print(f"    {Fore.WHITE}{models[str(model_num)]['desc']}{Style.RESET_ALL}\n")
-        model_num += 1
-
-        # GPT-5
-        models[str(model_num)] = {'name': 'gpt-5', 'provider': 'OpenAI',
-                                   'cost': '$0.30', 'speed': 'Slow', 'quality': 'Excellent',
-                                   'desc': 'PhD-level reasoning, catches transcript errors, most accurate'}
-        print(f"{Fore.GREEN}[{model_num}]{Style.RESET_ALL} {Fore.WHITE}{Style.BRIGHT}GPT-5{Style.RESET_ALL} "
-              f"{Fore.MAGENTA}[PHD-LEVEL]{Style.RESET_ALL}")
-        print(f"    {Fore.CYAN}Speed:{Style.RESET_ALL} Slow       {Fore.CYAN}Cost:{Style.RESET_ALL} ~$0.30    {Fore.CYAN}Quality:{Style.RESET_ALL} Excellent")
-        print(f"    {Fore.WHITE}{models[str(model_num)]['desc']}{Style.RESET_ALL}\n")
-        model_num += 1
-
-    if has_anthropic:
-        print(f"{Fore.MAGENTA}{'='*70}{Style.RESET_ALL}")
-        print(f"{Fore.MAGENTA}  ANTHROPIC CLAUDE MODELS{Style.RESET_ALL}")
-        print(f"{Fore.MAGENTA}{'='*70}{Style.RESET_ALL}\n")
-
-        # Claude Haiku 4.5
-        models[str(model_num)] = {'name': 'claude-haiku-4-5-20251001', 'provider': 'Anthropic',
-                                   'cost': '$0.08', 'speed': 'Very Fast', 'quality': 'Excellent',
-                                   'desc': 'Best value: 90% of Sonnet quality at 1/3 cost, very fast'}
-        print(f"{Fore.GREEN}[{model_num}]{Style.RESET_ALL} {Fore.WHITE}{Style.BRIGHT}CLAUDE HAIKU 4.5{Style.RESET_ALL} "
-              f"{Fore.YELLOW}[BEST VALUE]{Style.RESET_ALL}")
-        print(f"    {Fore.CYAN}Speed:{Style.RESET_ALL} Very Fast  {Fore.CYAN}Cost:{Style.RESET_ALL} ~$0.08    {Fore.CYAN}Quality:{Style.RESET_ALL} Excellent")
-        print(f"    {Fore.WHITE}{models[str(model_num)]['desc']}{Style.RESET_ALL}\n")
-        model_num += 1
-
-        # Claude Sonnet 4.5
-        models[str(model_num)] = {'name': 'claude-sonnet-4-5-20250929', 'provider': 'Anthropic',
-                                   'cost': '$0.25', 'speed': 'Medium', 'quality': 'Best',
-                                   'desc': 'Top quality: best overall analysis, detailed insights, world-class'}
-        print(f"{Fore.GREEN}[{model_num}]{Style.RESET_ALL} {Fore.WHITE}{Style.BRIGHT}CLAUDE SONNET 4.5{Style.RESET_ALL} "
-              f"{Fore.RED}[TOP QUALITY]{Style.RESET_ALL}")
-        print(f"    {Fore.CYAN}Speed:{Style.RESET_ALL} Medium     {Fore.CYAN}Cost:{Style.RESET_ALL} ~$0.25    {Fore.CYAN}Quality:{Style.RESET_ALL} Best")
-        print(f"    {Fore.WHITE}{models[str(model_num)]['desc']}{Style.RESET_ALL}\n")
-        model_num += 1
-
-    if not has_openai and not has_anthropic:
-        print(f"{Fore.RED}[!] No API keys found in .env file!{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}[*] Please add OPENAI_API_KEY or ANTHROPIC_API_KEY to your .env file{Style.RESET_ALL}")
-        sys.exit(1)
-
-    print(f"{Fore.YELLOW}{'─'*70}{Style.RESET_ALL}")
-    print(f"{Fore.YELLOW}Note:{Style.RESET_ALL} Costs shown are approximate for a 3-hour video")
-    print(f"{Fore.YELLOW}{'─'*70}{Style.RESET_ALL}")
-
-    while True:
-        choice = input(f"\n{Fore.WHITE}Select model (1-{len(models)}) [default: Claude Sonnet 4.5]: {Style.RESET_ALL}").strip()
-
-        if not choice:
-            # Default to Claude Sonnet 4.5 if available
-            if has_anthropic:
-                for k, v in models.items():
-                    if 'claude-sonnet-4-5-20250929' == v['id']:
-                        choice = k
-                        break
-            else:
-                choice = '1'
-
-        if choice in models:
-            selected = models[choice]
-            print(f"{Fore.GREEN}[+] Selected: {selected['name']}{Style.RESET_ALL}")
-            return selected['name']
-
-        print(f"{Fore.RED}[!] Invalid choice. Please enter 1-{len(models)}.{Style.RESET_ALL}")
-
-
-def process_single_video(url, whisper_model, summary_model, analysis_mode, keep_files, download_video=False, transcription_engine="whisper", video_num=None, total_videos=None):
-    """Process a single video with selected models."""
-
-    # Add video counter to header if processing multiple videos
-    if video_num and total_videos:
-        print(f"\n{Fore.CYAN}{'='*70}")
-        print(f"{Fore.CYAN}  Processing Video {video_num}/{total_videos}")
-        print(f"{Fore.CYAN}{'='*70}{Style.RESET_ALL}\n")
-
-    try:
-        # Step 1: Download
-        print(f"{Fore.CYAN}[1/3] Downloading {'video' if download_video else 'audio'}...{Style.RESET_ALL}")
-        downloader = YouTubeDownloader(output_dir="downloads")
-        video_data = downloader.download_video(url, audio_only=not download_video)
-        print(f"{Fore.CYAN}[+] Download complete{Style.RESET_ALL}\n")
-
-        # Step 2: Transcribe
-        # Map engine to display name
-        engine_names = {
-            "whisper": "Whisper",
-            "whisperx": "WhisperX",
-            "elevenlabs": "ElevenLabs"
-        }
-        transcription_type = engine_names.get(transcription_engine, "Whisper")
-
-        # Show model info for local engines, skip for ElevenLabs
-        model_info = f" ({whisper_model} model)" if transcription_engine != "elevenlabs" else ""
-        print(f"{Fore.CYAN}[2/3] Transcribing audio with {transcription_type}{model_info}...{Style.RESET_ALL}")
-
-        transcriber = AudioTranscriber(
-            model_name=whisper_model,
-            output_dir="transcripts",
-            use_whisperx=(transcription_engine == "whisperx"),
-            hf_token=os.getenv("HF_TOKEN"),
-            use_elevenlabs=(transcription_engine == "elevenlabs"),
-            elevenlabs_api_key=os.getenv("ELEVENLABS_API_KEY")
-        )
-        transcript_data = transcriber.transcribe(video_data['audio_file'])
-        print(f"{Fore.CYAN}[+] Transcription complete ({transcript_data['language']}){Style.RESET_ALL}\n")
-
-        # Step 3: Summarize
-        print(f"{Fore.CYAN}[3/3] Generating summary with {summary_model}...{Style.RESET_ALL}")
-        summarizer = ContentSummarizer(model=summary_model, output_dir="summaries")
-
-        metadata = {
-            'title': video_data['title'],
-            'uploader': video_data['uploader'],
-            'duration': video_data['duration'],
-            'url': video_data['url'],
-            'upload_date': video_data.get('upload_date', 'Unknown'),
-            'view_count': video_data.get('view_count', 0),
-            'like_count': video_data.get('like_count', 0),
-            'channel_url': video_data.get('channel_url', ''),
-            'tags': video_data.get('tags', []),
-            'categories': video_data.get('categories', []),
-            'description': video_data.get('description', ''),
-            'chapters': video_data.get('chapters', []),
-            'language': video_data.get('language', ''),
-            'whisper_model': whisper_model,
-            'analysis_mode': analysis_mode
-        }
-
-        summary_data = summarizer.summarize(
-            transcript_data['text'],
-            metadata,
-            analysis_mode,
-            transcription_engine=transcription_engine
-        )
-        print(f"{Fore.CYAN}[+] Summary complete{Style.RESET_ALL}\n")
-
-        # Cleanup
-        if not keep_files:
-            audio_file = Path(video_data['audio_file'])
-            if audio_file.exists():
-                audio_file.unlink()
-                print(f"{Fore.CYAN}[*] Cleaned up files{Style.RESET_ALL}\n")
-
-        # Print results
-        print(f"\n{Fore.CYAN}{'='*70}")
-        print(f"{Fore.CYAN}Video Processing Complete!{Style.RESET_ALL}")
-        print(f"{Fore.CYAN}{'='*70}\n")
-
-        try:
-            print(f"{Fore.CYAN}Video:{Style.RESET_ALL} {video_data['title']}")
-        except UnicodeEncodeError:
-            print(f"{Fore.CYAN}Video:{Style.RESET_ALL} [Title with special characters]")
-
-        print(f"{Fore.CYAN}Transcript:{Style.RESET_ALL} {transcript_data['text_file']}")
-        print(f"{Fore.CYAN}Summary:{Style.RESET_ALL} {summary_data['output_file']}\n")
-
-        return {
-            'success': True,
-            'title': video_data['title'],
-            'url': url,
-            'transcript': transcript_data['text_file'],
-            'summary': summary_data['output_file']
-        }
-
-    except Exception as e:
-        print(f"{Fore.MAGENTA}[!] Error processing video: {str(e)}{Style.RESET_ALL}\n")
-        return {
-            'success': False,
-            'url': url,
-            'error': str(e)
-        }
-
-
-def process_playlist(url, whisper_model, summary_model, analysis_mode, keep_files, download_video=False, transcription_engine="whisper"):
+def process_playlist(url, whisper_model, summary_model, analysis_mode, keep_files,
+                     download_video=False, transcription_engine="whisper"):
     """Process all videos in a playlist."""
+    paths = CONFIG['paths']
     try:
         # Get playlist videos
-        downloader = YouTubeDownloader(output_dir="downloads")
+        downloader = YouTubeDownloader(output_dir=paths['downloads'])
         videos = downloader.get_playlist_videos(url)
 
         if not videos:
@@ -738,19 +451,11 @@ def process_playlist(url, whisper_model, summary_model, analysis_mode, keep_file
             return False
 
         # Show playlist summary
-        engine_names = {
-            "whisper": "Whisper",
-            "whisperx": "WhisperX",
-            "elevenlabs": "ElevenLabs"
-        }
-        transcription_type = engine_names.get(transcription_engine, "Whisper")
-        model_info = f" ({whisper_model})" if transcription_engine != "elevenlabs" else ""
-
         print(f"\n{Fore.CYAN}{'='*70}")
         print(f"{Fore.CYAN}  PLAYLIST SUMMARY")
         print(f"{Fore.CYAN}{'='*70}{Style.RESET_ALL}\n")
         print(f"{Fore.CYAN}Total videos: {len(videos)}")
-        print(f"{Fore.CYAN}Transcription: {transcription_type}{model_info}")
+        print(f"{Fore.CYAN}Transcription: {engine_display_name(transcription_engine, whisper_model)}")
         print(f"{Fore.CYAN}AI model: {summary_model}")
         print(f"{Fore.CYAN}Analysis mode: {analysis_mode}\n")
 
@@ -771,16 +476,19 @@ def process_playlist(url, whisper_model, summary_model, analysis_mode, keep_file
             except UnicodeEncodeError:
                 print(f"\n{Fore.CYAN}Video Title: [Title with special characters]{Style.RESET_ALL}")
 
-            result = process_single_video(
+            result = process_video(
                 video['url'],
-                whisper_model,
-                summary_model,
-                analysis_mode,
-                keep_files,
-                download_video,
-                transcription_engine,
+                whisper_model=whisper_model,
+                gpt_model=summary_model,
+                analysis_mode=analysis_mode,
+                keep_files=keep_files,
+                transcription_engine=transcription_engine,
+                download_video=download_video,
                 video_num=idx,
-                total_videos=len(videos)
+                total_videos=len(videos),
+                downloads_dir=paths['downloads'],
+                transcripts_dir=paths['transcripts'],
+                summaries_dir=paths['summaries'],
             )
 
             results.append(result)
@@ -816,6 +524,7 @@ def process_playlist(url, whisper_model, summary_model, analysis_mode, keep_file
 def main():
     """Main interactive interface."""
     print_banner()
+    paths = CONFIG['paths']
 
     while True:
         # Step 1: Main menu
@@ -828,11 +537,11 @@ def main():
         # Step 2: Select transcription engine (Whisper / WhisperX / ElevenLabs)
         transcription_engine = select_transcription_mode_menu()
 
-        # Step 3: Select Whisper model (skip for ElevenLabs)
-        if transcription_engine == "elevenlabs":
-            whisper_model = "base"  # Not used for ElevenLabs, but needed for function signature
-        else:
+        # Step 3: Select Whisper model (only relevant for Whisper-family engines)
+        if transcription_engine in ("whisper", "whisperx"):
             whisper_model = select_whisper_model_menu()
+        else:
+            whisper_model = "base"  # Unused by parakeet/elevenlabs/openai, needed for signature
 
         # Step 4: Select AI model
         summary_model = select_summary_model_menu()
@@ -844,8 +553,7 @@ def main():
         url = get_youtube_url_menu()
 
         # Verify the URL type matches choice
-        downloader = YouTubeDownloader(output_dir="downloads")
-        is_playlist = downloader.is_playlist(url)
+        is_playlist = YouTubeDownloader.is_playlist(url)
 
         if choice == 0 and is_playlist:  # Selected single video but got playlist
             print(f"\n{Fore.MAGENTA}This is a playlist URL, but you selected single video. Please try again.{Style.RESET_ALL}\n")
@@ -854,7 +562,7 @@ def main():
             print(f"\n{Fore.MAGENTA}This is a single video URL, but you selected playlist. Please try again.{Style.RESET_ALL}\n")
             continue
 
-        # Step 6: Ask about keeping files and video option
+        # Step 7: Ask about keeping files and video option
         keep_menu = ["Keep audio only", "Keep video file", "Delete all after processing"]
         keep_choice = show_menu("File Options?", keep_menu, default_selected=2)
         keep_files = (keep_choice != 2)
@@ -863,9 +571,21 @@ def main():
         # Process based on type
         print(f"\n{Fore.CYAN}Starting processing...{Style.RESET_ALL}\n")
         if is_playlist:
-            process_playlist(url, whisper_model, summary_model, analysis_mode, keep_files, download_video, transcription_engine)
+            process_playlist(url, whisper_model, summary_model, analysis_mode, keep_files,
+                             download_video, transcription_engine)
         else:
-            process_single_video(url, whisper_model, summary_model, analysis_mode, keep_files, download_video, transcription_engine)
+            process_video(
+                url,
+                whisper_model=whisper_model,
+                gpt_model=summary_model,
+                analysis_mode=analysis_mode,
+                keep_files=keep_files,
+                transcription_engine=transcription_engine,
+                download_video=download_video,
+                downloads_dir=paths['downloads'],
+                transcripts_dir=paths['transcripts'],
+                summaries_dir=paths['summaries'],
+            )
 
         print(f"\n{Fore.CYAN}{'─' * 70}{Style.RESET_ALL}\n")
 

@@ -10,7 +10,7 @@ import threading
 import subprocess
 import json
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 from colorama import Fore, Style
 
 
@@ -19,34 +19,58 @@ class AudioTranscriber:
 
     def __init__(self, model_name: str = "base", output_dir: str = "transcripts",
                  use_whisperx: bool = False, hf_token: Optional[str] = None,
-                 use_elevenlabs: bool = False, elevenlabs_api_key: Optional[str] = None):
+                 use_elevenlabs: bool = False, elevenlabs_api_key: Optional[str] = None,
+                 engine: Optional[str] = None, openai_api_key: Optional[str] = None):
         """
         Initialize the transcriber.
 
         Args:
             model_name: Whisper model size (tiny, base, small, medium, large)
             output_dir: Directory to save transcripts
-            use_whisperx: If True, use WhisperX with speaker diarization (requires HF token)
+            use_whisperx: Legacy flag for the whisperx engine (prefer engine=)
             hf_token: Hugging Face token for speaker diarization (required if use_whisperx=True)
-            use_elevenlabs: If True, use ElevenLabs cloud transcription
-            elevenlabs_api_key: ElevenLabs API key (required if use_elevenlabs=True)
+            use_elevenlabs: Legacy flag for the elevenlabs engine (prefer engine=)
+            elevenlabs_api_key: ElevenLabs API key (required for elevenlabs engine)
+            engine: Transcription engine: whisper, whisperx, parakeet, elevenlabs,
+                    openai. Takes precedence over the legacy use_* flags.
+            openai_api_key: OpenAI API key (required for openai engine)
         """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self._stop_progress = False
-        self.use_whisperx = use_whisperx
-        self.use_elevenlabs = use_elevenlabs
+        # engine= is the modern selector; the use_* booleans remain so
+        # pre-0.2.0 library callers keep working unchanged
+        if engine is None:
+            engine = "whisperx" if use_whisperx else "elevenlabs" if use_elevenlabs else "whisper"
+        self.engine = engine
+        self.use_whisperx = (engine == "whisperx")
+        self.use_elevenlabs = (engine == "elevenlabs")
         self.model_name = model_name
         self.hf_token = hf_token or os.getenv("HF_TOKEN")
         self.elevenlabs_api_key = elevenlabs_api_key or os.getenv("ELEVENLABS_API_KEY")
+        self.openai_api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
+        self._parakeet_model = None
 
         # Use custom Whisper cache location (defaults to ~/.cache/whisper)
         # Set WHISPER_CACHE_DIR to customize location
         default_cache = os.path.join(os.path.expanduser("~"), ".cache", "whisper")
         whisper_cache = os.getenv("WHISPER_CACHE_DIR", default_cache)
         os.makedirs(whisper_cache, exist_ok=True)
+        self.whisper_cache = whisper_cache
 
-        if use_elevenlabs:
+        if self.engine == "openai":
+            print(f"[*] Using OpenAI gpt-4o-transcribe-diarize (cloud, speaker diarization)")
+            if not self.openai_api_key:
+                print(f"{Fore.YELLOW}[!] Warning: No OPENAI_API_KEY found - transcription will fail.{Style.RESET_ALL}")
+            self.model = None  # No local model needed
+        elif self.engine == "parakeet":
+            # NVIDIA Parakeet TDT 0.6B v3 via onnx-asr: pure-Python, no torch,
+            # ~670MB int8 model downloaded to the HF cache on first use
+            self._import_onnx_asr()  # fail fast with install hint if missing
+            print(f"[*] Using NVIDIA Parakeet TDT 0.6B v3 (local, 25 languages)")
+            print(f"[+] Parakeet initialized (model will load on first use)")
+            self.model = None
+        elif self.use_elevenlabs:
             print(f"[*] Using ElevenLabs cloud transcription (99 languages, speaker diarization)")
             if not self.elevenlabs_api_key:
                 print(f"{Fore.YELLOW}[!] Warning: No ELEVENLABS_API_KEY found.{Style.RESET_ALL}")
@@ -59,23 +83,49 @@ class AudioTranscriber:
             if not self.hf_token:
                 print(f"{Fore.YELLOW}[!] Warning: No HF_TOKEN found. Speaker diarization will be disabled.{Style.RESET_ALL}")
                 print(f"{Fore.YELLOW}    Set HF_TOKEN environment variable or pass hf_token parameter.{Style.RESET_ALL}")
-            # WhisperX models are loaded per-transcription for efficiency
+            # WhisperX models are loaded per-transcription for efficiency.
+            # The vanilla Whisper fallback (used if WhisperX hits CUDA issues)
+            # is loaded lazily too - eager loading doubled startup time and
+            # memory for runs where WhisperX works fine.
+            self._import_whisper()  # fail fast with install hint if missing
             print(f"[+] WhisperX initialized (model will load on first use)")
-
-            # Load vanilla Whisper as fallback in case WhisperX fails (CUDA issues, etc.)
-            import whisper
-            print(f"[*] Loading vanilla Whisper as fallback: {model_name}")
-            print(f"[*] Model cache: {whisper_cache}")
-            self.model = whisper.load_model(model_name, download_root=whisper_cache)
-            print(f"[+] Fallback model loaded successfully")
+            self.model = None
         else:
-            import whisper
+            whisper = self._import_whisper()
             print(f"[*] Loading Whisper model: {model_name}")
             print(f"[*] Model cache: {whisper_cache}")
             self.model = whisper.load_model(model_name, download_root=whisper_cache)
             print(f"[+] Model loaded successfully")
 
-    def _get_audio_duration(self, audio_file: str) -> float:
+    def _ensure_vanilla_model(self):
+        """Load the vanilla Whisper model if it isn't loaded yet."""
+        if self.model is None:
+            whisper = self._import_whisper()
+            print(f"[*] Loading Whisper model: {self.model_name}")
+            print(f"[*] Model cache: {self.whisper_cache}")
+            self.model = whisper.load_model(self.model_name, download_root=self.whisper_cache)
+            print(f"[+] Model loaded successfully")
+        return self.model
+
+    @staticmethod
+    def _import_whisper():
+        """Import openai-whisper, raising an actionable error when the optional extra is missing."""
+        try:
+            import whisper
+            return whisper
+        except ImportError as e:
+            raise ImportError(
+                "Local transcription requires openai-whisper and PyTorch, which are optional extras.\n"
+                "Install them with:\n"
+                "  uv sync --extra whisper\n"
+                "  (or: uv pip install openai-whisper torch torchaudio)\n"
+                "Alternatively, use --transcription-engine elevenlabs for cloud transcription "
+                "(no local models needed).\n"
+                f"Original error: {e}"
+            ) from e
+
+    @staticmethod
+    def _get_audio_duration(audio_file: str) -> float:
         """Get duration of audio file in seconds using ffprobe."""
         try:
             # Use ffprobe to get audio duration
@@ -96,7 +146,7 @@ class AudioTranscriber:
                 data = json.loads(result.stdout)
                 duration = float(data.get('format', {}).get('duration', 0))
                 return duration
-        except:
+        except Exception:
             pass
 
         return 0
@@ -144,7 +194,7 @@ class AudioTranscriber:
         return f"{mins:02d}:{secs:02d}"
 
     def transcribe(self, audio_file: str, language: Optional[str] = None,
-                   podcast_mode: bool = True) -> Dict[str, any]:
+                   podcast_mode: bool = True) -> Dict[str, Any]:
         """
         Transcribe an audio file.
 
@@ -171,16 +221,22 @@ class AudioTranscriber:
             print(f"[*] Transcribing audio file...")
 
         # Route to appropriate transcription method
-        if self.use_elevenlabs:
+        if self.engine == "elevenlabs":
             return self._transcribe_elevenlabs(audio_path, language, podcast_mode)
-        elif self.use_whisperx:
+        elif self.engine == "whisperx":
             return self._transcribe_whisperx(audio_path, language, podcast_mode)
+        elif self.engine == "openai":
+            return self._transcribe_openai(audio_path, language)
+        elif self.engine == "parakeet":
+            return self._transcribe_parakeet(audio_path, language)
         else:
             return self._transcribe_vanilla(audio_path, language, podcast_mode)
 
-    def _transcribe_vanilla(self, audio_path: Path, language: Optional[str], podcast_mode: bool) -> Dict[str, any]:
+    def _transcribe_vanilla(self, audio_path: Path, language: Optional[str], podcast_mode: bool) -> Dict[str, Any]:
         """Transcribe using vanilla Whisper."""
         try:
+            model = self._ensure_vanilla_model()
+
             # Get audio duration for progress estimation
             duration = self._get_audio_duration(str(audio_path))
 
@@ -192,15 +248,15 @@ class AudioTranscriber:
                 progress_thread.daemon = True
                 progress_thread.start()
 
-            # Create optimized prompt for podcast/multi-speaker content
+            # Style prompt for conversational content. Kept topic-neutral:
+            # naming subjects here (e.g. "technology podcast") biases Whisper
+            # toward those words on unrelated content.
             if podcast_mode:
                 initial_prompt = (
-                    "This is a professional podcast interview discussing technology, business, and innovation. "
-                    "The speakers use natural conversational speech with occasional filler words. "
-                    "Use proper punctuation and capitalize names, companies, products, and technical terms correctly. "
+                    "This is a recording of people speaking naturally, with occasional filler words. "
+                    "Use proper punctuation and capitalize names, places, organizations, and technical terms correctly. "
                     "Format in complete sentences with clear paragraph breaks. "
-                    "Preserve meaningful pauses and emphasis while minimizing excessive filler words like um, uh, you know. "
-                    "Maintain accuracy for all speakers and their distinct speaking styles."
+                    "Minimize excessive filler words like um, uh, you know."
                 )
             else:
                 initial_prompt = None
@@ -219,7 +275,7 @@ class AudioTranscriber:
             if initial_prompt:
                 transcribe_options['initial_prompt'] = initial_prompt
 
-            result = self.model.transcribe(
+            result = model.transcribe(
                 str(audio_path),
                 **transcribe_options
             )
@@ -269,7 +325,7 @@ class AudioTranscriber:
         except Exception as e:
             raise Exception(f"Transcription failed: {str(e)}")
 
-    def _transcribe_whisperx(self, audio_path: Path, language: Optional[str], podcast_mode: bool) -> Dict[str, any]:
+    def _transcribe_whisperx(self, audio_path: Path, language: Optional[str], podcast_mode: bool) -> Dict[str, Any]:
         """Transcribe using WhisperX with speaker diarization. Falls back to vanilla Whisper on failure."""
         try:
             import whisperx
@@ -423,7 +479,7 @@ class AudioTranscriber:
             except Exception as fallback_error:
                 raise Exception(f"Both WhisperX and Whisper failed. WhisperX: {str(e)}, Whisper: {str(fallback_error)}")
 
-    def _transcribe_elevenlabs(self, audio_path: Path, language: Optional[str], podcast_mode: bool) -> Dict[str, any]:
+    def _transcribe_elevenlabs(self, audio_path: Path, language: Optional[str], podcast_mode: bool) -> Dict[str, Any]:
         """Transcribe using ElevenLabs cloud API (synchronous)."""
         try:
             from elevenlabs.client import ElevenLabs
@@ -623,6 +679,222 @@ class AudioTranscriber:
 
             raise Exception(f"ElevenLabs transcription failed: {str(e)}")
 
+    # ------------------------------------------------------------------
+    # OpenAI gpt-4o-transcribe-diarize (cloud, speaker diarization)
+    # ------------------------------------------------------------------
+
+    OPENAI_UPLOAD_LIMIT = 24 * 1024 * 1024  # API rejects files over 25MB
+
+    def _prepare_for_openai(self, audio_path: Path) -> Path:
+        """
+        Ensure the upload fits the OpenAI 25MB file limit.
+
+        Speech transcribes fine at low bitrates, so oversized files are
+        re-encoded to 16kbps mono Opus (3h of audio ~ 21MB) instead of being
+        chunked - chunking would break speaker-label continuity.
+        """
+        if audio_path.stat().st_size <= self.OPENAI_UPLOAD_LIMIT:
+            return audio_path
+
+        compact = audio_path.with_suffix('.openai.ogg')
+        print(f"[*] Audio exceeds OpenAI's 25MB limit - re-encoding to 16kbps mono Opus...")
+        result = subprocess.run(
+            ['ffmpeg', '-y', '-i', str(audio_path), '-ac', '1', '-c:a', 'libopus',
+             '-b:a', '16k', '-application', 'voip', str(compact)],
+            capture_output=True, text=True, timeout=1800,
+        )
+        if result.returncode != 0 or not compact.exists():
+            raise Exception(f"ffmpeg re-encode failed: {result.stderr[-300:]}")
+        if compact.stat().st_size > self.OPENAI_UPLOAD_LIMIT:
+            raise Exception(
+                "Audio still exceeds OpenAI's 25MB limit after re-encoding "
+                "(over ~3.5 hours). Use whisper, parakeet or elevenlabs for this file."
+            )
+        return compact
+
+    def _transcribe_openai(self, audio_path: Path, language: Optional[str]) -> Dict[str, Any]:
+        """Transcribe using OpenAI gpt-4o-transcribe-diarize (cloud)."""
+        try:
+            from openai import OpenAI
+
+            if not self.openai_api_key:
+                raise Exception("OpenAI API key not found. Set OPENAI_API_KEY environment variable.")
+
+            client = OpenAI(api_key=self.openai_api_key)
+            upload_path = self._prepare_for_openai(audio_path)
+
+            duration = self._get_audio_duration(str(audio_path))
+            print(f"[*] Uploading and transcribing with gpt-4o-transcribe-diarize...")
+            print(f"[*] Audio duration: {self._format_timestamp(duration)}")
+
+            with open(upload_path, 'rb') as audio_file:
+                params: Dict[str, Any] = {
+                    "model": "gpt-4o-transcribe-diarize",
+                    "file": audio_file,
+                    # diarized_json is required to receive speaker annotations;
+                    # chunking_strategy is mandatory for audio over 30 seconds
+                    "response_format": "diarized_json",
+                    "chunking_strategy": "auto",
+                }
+                if language:
+                    params["language"] = language
+                response = client.audio.transcriptions.create(**params)
+
+            # Clean up the temporary re-encoded file
+            if upload_path != audio_path:
+                upload_path.unlink(missing_ok=True)
+
+            # Normalize the SDK response to a dict regardless of SDK version
+            if hasattr(response, 'model_dump'):
+                data = response.model_dump()
+            elif isinstance(response, dict):
+                data = response
+            else:
+                data = json.loads(str(response))
+
+            segments = data.get('segments') or []
+            if segments:
+                lines = []
+                for seg in segments:
+                    speaker = str(seg.get('speaker', 'SPEAKER')).upper()
+                    timestamp = self._format_timestamp(float(seg.get('start', 0) or 0))
+                    text = (seg.get('text') or '').strip()
+                    if text:
+                        lines.append(f"**[{speaker}]** `[{timestamp}]` {text}\n")
+                plain_text = '\n'.join(lines)
+            else:
+                plain_text = (data.get('text') or '').strip()
+
+            if not plain_text:
+                raise Exception("OpenAI returned an empty transcript")
+
+            markdown_content = f"""# Transcript
+
+**Language:** {language or 'auto'}
+**Duration:** {self._format_timestamp(duration)}
+**Transcription:** OpenAI gpt-4o-transcribe-diarize (Speaker Diarization)
+
+---
+
+{plain_text}
+"""
+            md_file = self.output_dir / f"{audio_path.stem}_transcript.md"
+            with open(md_file, 'w', encoding='utf-8') as f:
+                f.write(markdown_content)
+
+            print(f"[+] Transcription complete")
+            print(f"[*] Saved to: {md_file}")
+
+            return {
+                'text': plain_text,
+                'language': language or 'auto',
+                'text_file': str(md_file),
+            }
+
+        except Exception as e:
+            raise Exception(f"OpenAI transcription failed: {str(e)}")
+
+    # ------------------------------------------------------------------
+    # NVIDIA Parakeet TDT 0.6B v3 via onnx-asr (local, no torch)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _import_onnx_asr():
+        """Import onnx-asr, raising an actionable error when the extra is missing."""
+        try:
+            import onnx_asr
+            return onnx_asr
+        except ImportError as e:
+            raise ImportError(
+                "The parakeet engine requires onnx-asr (lightweight, no PyTorch).\n"
+                "Install it with:\n"
+                "  uv sync --extra parakeet\n"
+                "  (or: uv pip install \"onnx-asr[cpu,hub]\")\n"
+                f"Original error: {e}"
+            ) from e
+
+    def _segment_to_wav(self, audio_path: Path, segment_seconds: int = 120) -> list:
+        """Split audio into 16kHz mono WAV segments via ffmpeg (temp files)."""
+        import tempfile
+        tmp_dir = Path(tempfile.mkdtemp(prefix="sonopsis_parakeet_"))
+        pattern = tmp_dir / "chunk_%04d.wav"
+        result = subprocess.run(
+            ['ffmpeg', '-y', '-i', str(audio_path), '-ac', '1', '-ar', '16000',
+             '-f', 'segment', '-segment_time', str(segment_seconds), str(pattern)],
+            capture_output=True, text=True, timeout=1800,
+        )
+        if result.returncode != 0:
+            raise Exception(f"ffmpeg segmentation failed: {result.stderr[-300:]}")
+        return sorted(tmp_dir.glob("chunk_*.wav"))
+
+    def _transcribe_parakeet(self, audio_path: Path, language: Optional[str]) -> Dict[str, Any]:
+        """Transcribe using NVIDIA Parakeet TDT 0.6B v3 (local, int8 ONNX)."""
+        chunks = []
+        try:
+            onnx_asr = self._import_onnx_asr()
+
+            if self._parakeet_model is None:
+                print(f"[*] Loading Parakeet TDT 0.6B v3 (int8) - first run downloads ~670MB to the HF cache...")
+                self._parakeet_model = onnx_asr.load_model(
+                    "nemo-parakeet-tdt-0.6b-v3", quantization="int8"
+                )
+                print(f"[+] Parakeet model loaded")
+
+            duration = self._get_audio_duration(str(audio_path))
+            print(f"[*] Audio duration: {self._format_timestamp(duration)}")
+
+            # Segment via ffmpeg: deterministic memory use on multi-hour audio,
+            # and onnx-asr expects 16kHz mono WAV input
+            chunks = self._segment_to_wav(audio_path)
+            print(f"[*] Transcribing {len(chunks)} segment(s)...")
+
+            texts = []
+            for i, chunk in enumerate(chunks, 1):
+                text = self._parakeet_model.recognize(str(chunk))
+                if text and text.strip():
+                    texts.append(text.strip())
+                sys.stdout.write(f"\r{Fore.CYAN}[{i}/{len(chunks)}] segments transcribed{Style.RESET_ALL}")
+                sys.stdout.flush()
+            print()
+
+            plain_text = ' '.join(texts).strip()
+            if not plain_text:
+                raise Exception("Parakeet returned an empty transcript")
+
+            markdown_content = f"""# Transcript
+
+**Language:** {language or 'auto'}
+**Duration:** {self._format_timestamp(duration)}
+**Transcription:** NVIDIA Parakeet TDT 0.6B v3 (local)
+
+---
+
+{plain_text}
+"""
+            md_file = self.output_dir / f"{audio_path.stem}_transcript.md"
+            with open(md_file, 'w', encoding='utf-8') as f:
+                f.write(markdown_content)
+
+            print(f"[+] Transcription complete")
+            print(f"[*] Saved to: {md_file}")
+
+            return {
+                'text': plain_text,
+                'language': language or 'auto',
+                'text_file': str(md_file),
+            }
+
+        except Exception as e:
+            raise Exception(f"Parakeet transcription failed: {str(e)}")
+        finally:
+            # Remove temp WAV segments
+            for chunk in chunks:
+                try:
+                    chunk.unlink()
+                    chunk.parent.rmdir()
+                except OSError:
+                    pass
+
     @staticmethod
     def _format_timestamp(seconds: float) -> str:
         """Format seconds to HH:MM:SS."""
@@ -630,25 +902,3 @@ class AudioTranscriber:
         minutes = int((seconds % 3600) // 60)
         secs = int(seconds % 60)
         return f"{hours:02d}:{minutes:02d}:{secs:02d}"
-
-    @staticmethod
-    def _parse_srt_timestamp(timestamp: str) -> float:
-        """
-        Parse SRT timestamp format to seconds.
-
-        Args:
-            timestamp: SRT timestamp in format "HH:MM:SS,mmm" (e.g., "00:01:23,456")
-
-        Returns:
-            Time in seconds as float
-        """
-        # Format: "00:01:23,456" -> 83.456 seconds
-        try:
-            time_part, ms_part = timestamp.split(',')
-            hours, minutes, seconds = map(int, time_part.split(':'))
-            milliseconds = int(ms_part)
-
-            total_seconds = hours * 3600 + minutes * 60 + seconds + (milliseconds / 1000.0)
-            return total_seconds
-        except Exception:
-            return 0.0

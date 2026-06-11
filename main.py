@@ -1,22 +1,25 @@
 """
 Sonopsis - YouTube Video Summarizer
-Main application entry point.
+Main application entry point (CLI).
 """
 
 import os
 import sys
 import argparse
-from pathlib import Path
 from dotenv import load_dotenv
 from colorama import init, Fore, Style
 
-# Set UTF-8 encoding for Windows console
-if sys.platform == 'win32':
-    os.environ['PYTHONIOENCODING'] = 'utf-8'
+# Reconfigure stdout/stderr for UTF-8 on Windows (setting PYTHONIOENCODING
+# after interpreter start has no effect on the current process)
+if sys.platform == 'win32' and hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
+from utils.config import default_engine, load_config
 from utils.downloader import YouTubeDownloader
-from utils.transcriber import AudioTranscriber
-from utils.summarizer import ContentSummarizer
+from utils.models import DEFAULT_API_MODEL, DEFAULT_CLI_MODEL
+from utils.pipeline import engine_display_name, find_existing_summary, process_video
+from utils.summarizer import claude_cli_available
 
 
 # Initialize colorama for cross-platform colored output
@@ -45,207 +48,85 @@ def print_info(message: str):
     print(f"{Fore.YELLOW}[*] {message}{Style.RESET_ALL}")
 
 
-def process_single_video(url: str, whisper_model: str = "base", gpt_model: str = "gpt-4o-mini",
-                         analysis_mode: str = "basic", keep_files: bool = False,
-                         transcription_engine: str = "whisper",
-                         video_num: int = None, total_videos: int = None):
-    """
-    Process a single YouTube video: download, transcribe, and summarize.
-
-    Args:
-        url: YouTube video URL
-        whisper_model: Whisper model size (tiny, base, small, medium, large)
-        gpt_model: GPT model for summarization
-        analysis_mode: Analysis mode (basic or advanced)
-        keep_files: Whether to keep downloaded audio files
-        transcription_engine: Transcription engine (whisper, whisperx, or elevenlabs)
-        video_num: Current video number (for batch processing)
-        total_videos: Total number of videos (for batch processing)
-
-    Returns:
-        Dictionary with success status and results
-    """
-    if video_num and total_videos:
-        print(f"\n{Fore.MAGENTA}{'='*60}")
-        print(f"{Fore.MAGENTA}Processing Video {video_num}/{total_videos}")
-        print(f"{Fore.MAGENTA}{'='*60}{Style.RESET_ALL}\n")
-
-    try:
-        # Step 1: Download video
-        print_info("Step 1/3: Downloading video...")
-        downloader = YouTubeDownloader(output_dir="downloads")
-        video_data = downloader.download_video(url, audio_only=True)
-        print_success(f"Downloaded: {video_data['title']}")
-
-        # Step 2: Transcribe audio
-        engine_names = {
-            "whisper": "Whisper",
-            "whisperx": "WhisperX",
-            "elevenlabs": "ElevenLabs"
-        }
-        engine_display = engine_names.get(transcription_engine, "Whisper")
-        model_info = f" ({whisper_model})" if transcription_engine != "elevenlabs" else ""
-
-        print_info(f"\nStep 2/3: Transcribing audio with {engine_display}{model_info}...")
-        transcriber = AudioTranscriber(
-            model_name=whisper_model,
-            output_dir="transcripts",
-            use_whisperx=(transcription_engine == "whisperx"),
-            hf_token=os.getenv("HF_TOKEN"),
-            use_elevenlabs=(transcription_engine == "elevenlabs"),
-            elevenlabs_api_key=os.getenv("ELEVENLABS_API_KEY")
-        )
-        transcript_data = transcriber.transcribe(video_data['audio_file'])
-        print_success(f"Transcription complete ({transcript_data['language']})")
-
-        # Step 3: Generate summary
-        print_info("\nStep 3/3: Generating summary...")
-        summarizer = ContentSummarizer(model=gpt_model, output_dir="summaries")
-
-        # Combine video metadata for summary
-        metadata = {
-            'title': video_data['title'],
-            'uploader': video_data['uploader'],
-            'duration': video_data['duration'],
-            'url': video_data['url'],
-            'upload_date': video_data.get('upload_date', 'Unknown'),
-            'view_count': video_data.get('view_count', 0),
-            'like_count': video_data.get('like_count', 0),
-            'channel_url': video_data.get('channel_url', ''),
-            'tags': video_data.get('tags', []),
-            'categories': video_data.get('categories', []),
-            'description': video_data.get('description', ''),
-            'chapters': video_data.get('chapters', []),
-            'language': video_data.get('language', ''),
-            'whisper_model': whisper_model,
-            'analysis_mode': analysis_mode
-        }
-
-        summary_data = summarizer.summarize(
-            transcript_data['text'],
-            metadata,
-            analysis_mode,
-            transcription_engine=transcription_engine
-        )
-        print_success("Summary generated")
-
-        # Cleanup
-        if not keep_files:
-            print_info("\nCleaning up temporary files...")
-            audio_file = Path(video_data['audio_file'])
-            if audio_file.exists():
-                audio_file.unlink()
-                print_success(f"Removed: {audio_file.name}")
-
-        # Print results
-        print(f"\n{Fore.GREEN}{'='*60}")
-        if video_num and total_videos:
-            print(f"{Fore.GREEN}✓ Video {video_num}/{total_videos} Complete! ({total_videos - video_num} remaining){Style.RESET_ALL}")
-        else:
-            print(f"{Fore.GREEN}Processing Complete!{Style.RESET_ALL}")
-        print(f"{Fore.GREEN}{'='*60}\n")
-
-        print(f"{Fore.WHITE}Video: {Fore.YELLOW}{video_data['title']}{Style.RESET_ALL}")
-        print(f"{Fore.WHITE}Transcript: {Fore.YELLOW}{transcript_data['text_file']}{Style.RESET_ALL}")
-        print(f"{Fore.WHITE}Summary: {Fore.YELLOW}{summary_data['output_file']}{Style.RESET_ALL}\n")
-
-        return {
-            'success': True,
-            'video': video_data,
-            'transcript': transcript_data,
-            'summary': summary_data
-        }
-
-    except Exception as e:
-        print_error(f"Error: {str(e)}\n")
-        return {
-            'success': False,
-            'url': url,
-            'error': str(e)
-        }
-
-
-def process_playlist(url: str, whisper_model: str = "base", gpt_model: str = "gpt-4o-mini",
-                     analysis_mode: str = "basic", keep_files: bool = False,
-                     transcription_engine: str = "whisper", start_from: int = 1):
+def process_playlist(url: str, args, paths: dict):
     """
     Process all videos in a YouTube playlist.
 
     Args:
         url: YouTube playlist URL
-        whisper_model: Whisper model size
-        gpt_model: GPT model for summarization
-        analysis_mode: Analysis mode (basic or advanced)
-        keep_files: Whether to keep downloaded audio files
-        transcription_engine: Transcription engine (whisper, whisperx, or elevenlabs)
-        start_from: Video number to start from (1-indexed)
+        args: Parsed CLI arguments
+        paths: Output directory configuration
     """
     print_header()
 
     try:
         # Extract playlist videos
-        downloader = YouTubeDownloader(output_dir="downloads")
+        downloader = YouTubeDownloader(output_dir=paths['downloads'])
         videos = downloader.get_playlist_videos(url)
 
         if not videos:
             print_error("No videos found in playlist")
             sys.exit(1)
 
-        engine_names = {
-            "whisper": "Whisper",
-            "whisperx": "WhisperX",
-            "elevenlabs": "ElevenLabs"
-        }
-        engine_display = engine_names.get(transcription_engine, "Whisper")
-        model_info = f" ({whisper_model})" if transcription_engine != "elevenlabs" else ""
-
         print(f"\n{Fore.CYAN}{'='*60}")
         print(f"{Fore.CYAN}Playlist Processing Summary")
         print(f"{Fore.CYAN}{'='*60}{Style.RESET_ALL}\n")
         print_info(f"Total videos: {len(videos)}")
-        if start_from > 1:
-            print_info(f"Starting from video: {start_from}")
-        print_info(f"Transcription: {engine_display}{model_info}")
-        print_info(f"AI model: {gpt_model}\n")
+        if args.start_from > 1:
+            print_info(f"Starting from video: {args.start_from}")
+        print_info(f"Transcription: {engine_display_name(args.transcription_engine, args.whisper_model)}")
+        print_info(f"AI model: {args.gpt_model}\n")
 
         # Process each video
         results = []
         successful = 0
         failed = 0
+        skipped = 0
 
         for idx, video in enumerate(videos, 1):
             # Skip videos before start_from
-            if idx < start_from:
+            if idx < args.start_from:
                 continue
+
+            # Resumability: skip videos that already have a summary on disk
+            if args.skip_existing:
+                existing = find_existing_summary(video['url'], paths['summaries'])
+                if existing:
+                    skipped += 1
+                    print_info(f"Skipping video {idx}/{len(videos)} (summary exists: {existing.name})")
+                    continue
+
             try:
                 print_info(f"Processing: {video['title']}")
             except UnicodeEncodeError:
                 print_info(f"Processing video {idx}/{len(videos)}")
 
-            result = process_single_video(
+            result = process_video(
                 video['url'],
-                whisper_model,
-                gpt_model,
-                analysis_mode,
-                keep_files,
-                transcription_engine,
+                whisper_model=args.whisper_model,
+                gpt_model=args.gpt_model,
+                analysis_mode=args.analysis_mode,
+                keep_files=args.keep_files,
+                transcription_engine=args.transcription_engine,
                 video_num=idx,
-                total_videos=len(videos)
+                total_videos=len(videos),
+                downloads_dir=paths['downloads'],
+                transcripts_dir=paths['transcripts'],
+                summaries_dir=paths['summaries'],
             )
 
             results.append(result)
 
             if result['success']:
                 successful += 1
-                # Print running progress update
-                videos_processed = successful + failed
-                videos_to_process = len(videos) - (start_from - 1)
-                print(f"\n{Fore.CYAN}{'─'*60}")
-                print(f"{Fore.CYAN}📊 PROGRESS: {videos_processed}/{videos_to_process} videos processed")
-                print(f"{Fore.CYAN}   ✓ Success: {successful}  ✗ Failed: {failed}")
-                print(f"{Fore.CYAN}{'─'*60}{Style.RESET_ALL}\n")
             else:
                 failed += 1
+
+            # Running progress update
+            print(f"\n{Fore.CYAN}{'─'*60}")
+            print(f"{Fore.CYAN}PROGRESS: {successful + failed}/{len(videos) - (args.start_from - 1) - skipped} videos processed")
+            print(f"{Fore.CYAN}   Success: {successful}  Failed: {failed}  Skipped: {skipped}")
+            print(f"{Fore.CYAN}{'─'*60}{Style.RESET_ALL}\n")
 
         # Final summary
         print(f"\n{Fore.CYAN}{'='*60}")
@@ -253,6 +134,8 @@ def process_playlist(url: str, whisper_model: str = "base", gpt_model: str = "gp
         print(f"{Fore.CYAN}{'='*60}{Style.RESET_ALL}\n")
 
         print_success(f"Successful: {successful}/{len(videos)}")
+        if skipped:
+            print_info(f"Skipped (already summarized): {skipped}/{len(videos)}")
         if failed > 0:
             print_error(f"Failed: {failed}/{len(videos)}\n")
 
@@ -267,19 +150,18 @@ def process_playlist(url: str, whisper_model: str = "base", gpt_model: str = "gp
         sys.exit(1)
 
 
-def main():
-    """Main entry point."""
-    # Load environment variables (.env takes precedence over system env vars)
-    load_dotenv(override=True)
+def build_parser(config: dict, has_claude_cli: bool) -> argparse.ArgumentParser:
+    """Build the CLI argument parser with config-driven defaults."""
+    defaults = config['defaults']
 
-    # Check for API keys
-    if not os.getenv("OPENAI_API_KEY") and not os.getenv("ANTHROPIC_API_KEY"):
-        print_error("No API keys found in environment variables.")
-        print_info("Please create a .env file with OPENAI_API_KEY or ANTHROPIC_API_KEY.")
-        print_info("See .env.example for reference.")
-        sys.exit(1)
+    # Prefer the Claude Code CLI (subscription billing) over API models when
+    # installed. Precedence: SUMMARY_MODEL env > config.yaml > auto-detect.
+    default_summary_model = (
+        os.getenv("SUMMARY_MODEL")
+        or defaults.get('summary_model')
+        or (DEFAULT_CLI_MODEL if has_claude_cli else DEFAULT_API_MODEL)
+    )
 
-    # Parse command line arguments
     parser = argparse.ArgumentParser(
         description="Download, transcribe, and summarize YouTube videos and playlists",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -289,9 +171,11 @@ Examples:
   python main.py https://www.youtube.com/watch?v=dQw4w9WgXcQ
   python main.py https://youtu.be/dQw4w9WgXcQ --whisper-model small
 
-  # Playlist
-  python main.py "https://www.youtube.com/playlist?list=PLxxxxxxx"
-  python main.py <PLAYLIST_URL> --gpt-model claude-sonnet-4-5-20250929
+  # Summarize on your Claude subscription (no API key)
+  python main.py <URL> --gpt-model claude-cli
+
+  # Playlist (resumable)
+  python main.py "https://www.youtube.com/playlist?list=PLxxxxxxx" --skip-existing
 
   # Keep audio files
   python main.py <URL> --keep-files
@@ -305,34 +189,40 @@ Examples:
 
     parser.add_argument(
         "--transcription-engine",
-        default="whisper",
-        choices=["whisper", "whisperx", "elevenlabs"],
-        help="Transcription engine: whisper (local, free), whisperx (local with speaker diarization), elevenlabs (cloud, paid) (default: whisper)"
+        default=default_engine(defaults.get('transcription_engine')),
+        choices=["whisper", "whisperx", "parakeet", "elevenlabs", "openai"],
+        help="Transcription engine: whisper (local, free), whisperx (local + speaker diarization), "
+             "parakeet (local, beats Whisper accuracy, no PyTorch needed), "
+             "elevenlabs (cloud, diarization), openai (cloud gpt-4o-transcribe-diarize) "
+             "(default: %(default)s)"
     )
 
     parser.add_argument(
         "--whisper-model",
-        default=os.getenv("WHISPER_MODEL", "base"),
+        default=os.getenv("WHISPER_MODEL", defaults.get('whisper_model', 'base')),
         choices=["tiny", "base", "small", "medium", "large"],
-        help="Whisper model size for local transcription (default: base, not used for elevenlabs)"
+        help="Whisper model size for local transcription (default: %(default)s, not used for elevenlabs)"
     )
 
     parser.add_argument(
         "--gpt-model",
-        default=os.getenv("SUMMARY_MODEL", "claude-sonnet-4-5-20250929"),
-        help="AI model for summarization (default: claude-sonnet-4-5-20250929)"
+        default=default_summary_model,
+        help=f"AI model for summarization (default: {default_summary_model}). "
+             "Use claude-cli[/sonnet|/opus|/haiku] to summarize via the Claude Code CLI "
+             "on your Claude subscription instead of an API key."
     )
 
     parser.add_argument(
         "--analysis-mode",
-        default="basic",
+        default=defaults.get('analysis_mode', 'basic'),
         choices=["basic", "advanced"],
-        help="Analysis mode: basic (5 sections) or advanced (9 sections) (default: basic)"
+        help="Analysis mode: basic (5 sections) or advanced (9 sections) (default: %(default)s)"
     )
 
     parser.add_argument(
         "--keep-files",
         action="store_true",
+        default=config['processing'].get('keep_files', False),
         help="Keep downloaded audio files"
     )
 
@@ -343,33 +233,55 @@ Examples:
         help="Start processing from video number (for playlists, default: 1)"
     )
 
+    parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="Skip videos that already have a summary on disk (makes playlist runs resumable)"
+    )
+
+    return parser
+
+
+def main():
+    """Main entry point."""
+    # Load environment variables (.env takes precedence over system env vars)
+    load_dotenv(override=True)
+
+    config = load_config()
+    paths = config['paths']
+    has_claude_cli = claude_cli_available()
+
+    # Parse arguments FIRST so --help and argparse validation work without
+    # any API keys configured
+    parser = build_parser(config, has_claude_cli)
     args = parser.parse_args()
 
-    # Check if URL is a playlist
-    downloader = YouTubeDownloader(output_dir="downloads")
-    is_playlist = downloader.is_playlist(args.url)
+    # Check for a usable summarization backend: API keys or the Claude Code CLI
+    if not os.getenv("OPENAI_API_KEY") and not os.getenv("ANTHROPIC_API_KEY") \
+            and not os.getenv("OPENROUTER_API_KEY") and not has_claude_cli:
+        print_error("No summarization backend found.")
+        print_info("Either create a .env file with OPENAI_API_KEY or ANTHROPIC_API_KEY,")
+        print_info("or install the Claude Code CLI (https://claude.com/claude-code) to use your Claude subscription.")
+        print_info("See .env.example for reference.")
+        sys.exit(1)
 
-    if is_playlist:
+    # Check if URL is a playlist
+    if YouTubeDownloader.is_playlist(args.url):
         print_info("Detected: YouTube Playlist\n")
-        process_playlist(
-            url=args.url,
+        process_playlist(args.url, args, paths)
+    else:
+        print_header()
+        print_info("Detected: Single Video\n")
+        result = process_video(
+            args.url,
             whisper_model=args.whisper_model,
             gpt_model=args.gpt_model,
             analysis_mode=args.analysis_mode,
             keep_files=args.keep_files,
             transcription_engine=args.transcription_engine,
-            start_from=args.start_from
-        )
-    else:
-        print_header()
-        print_info("Detected: Single Video\n")
-        result = process_single_video(
-            url=args.url,
-            whisper_model=args.whisper_model,
-            gpt_model=args.gpt_model,
-            analysis_mode=args.analysis_mode,
-            keep_files=args.keep_files,
-            transcription_engine=args.transcription_engine
+            downloads_dir=paths['downloads'],
+            transcripts_dir=paths['transcripts'],
+            summaries_dir=paths['summaries'],
         )
 
         if not result['success']:
