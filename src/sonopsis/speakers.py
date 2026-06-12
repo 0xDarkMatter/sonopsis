@@ -75,7 +75,9 @@ def infer_speaker_count(video_metadata: Dict[str, Any]) -> Optional[int]:
         count = prediction.get("num_speakers")
         if str(prediction.get("confidence", "")).lower() != "high":
             return None
-        if not isinstance(count, int) or not (1 <= count <= MAX_REASONABLE_SPEAKERS):
+        # bool is a subclass of int - "num_speakers": true must not become 1
+        if isinstance(count, bool) or not isinstance(count, int) \
+                or not (1 <= count <= MAX_REASONABLE_SPEAKERS):
             return None
 
         rationale = str(prediction.get("rationale", ""))[:100]

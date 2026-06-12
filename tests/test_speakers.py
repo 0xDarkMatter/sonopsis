@@ -57,6 +57,14 @@ class TestGate:
     def test_missing_confidence_key_rejected(self):
         assert _run({"num_speakers": 2, "rationale": "x"}) is None
 
+    def test_boolean_count_rejected(self):
+        """bool subclasses int - 'num_speakers': true must not become 1."""
+        assert _run({"num_speakers": True, "confidence": "high", "rationale": "x"}) is None
+        assert _run({"num_speakers": False, "confidence": "high", "rationale": "x"}) is None
+
+    def test_float_count_rejected(self):
+        assert _run({"num_speakers": 2.0, "confidence": "high", "rationale": "x"}) is None
+
 
 class TestFailureModes:
     def test_no_cli_returns_none(self):
@@ -75,6 +83,13 @@ class TestFailureModes:
         proc = MagicMock(returncode=0,
                          stdout=json.dumps({"result": "I think there are two speakers."}))
         assert _run(proc=proc) is None
+
+    def test_cli_timeout_returns_none(self):
+        import subprocess
+        with patch("sonopsis.speakers.shutil.which", return_value="C:/fake/claude.exe"):
+            with patch("sonopsis.speakers.subprocess.run",
+                       side_effect=subprocess.TimeoutExpired("claude", 180)):
+                assert infer_speaker_count(META) is None
 
     def test_untrusted_description_only_yields_clamped_int(self):
         """Even a malicious description can only ever produce a 1-8 integer."""
