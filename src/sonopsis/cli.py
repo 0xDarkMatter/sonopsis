@@ -234,6 +234,11 @@ def transcribe(
     paths = config["paths"]
     engine = engine or _engine_option_default()
 
+    # _error must never fire inside the redirect block - its JSON envelope
+    # belongs on the real stdout, not the diverted one. Collect failures and
+    # report after the redirect ends.
+    failure = None
+    result = None
     with contextlib.redirect_stdout(sys.stderr):
         if URL_RE.search(source):
             video = YouTubeDownloader(output_dir=paths["downloads"]).download_video(source)
@@ -242,22 +247,26 @@ def transcribe(
         elif Path(source).exists():
             audio_file, reused = source, True
         else:
-            _error(f"Source not found: {source}", "NOT_FOUND", EXIT_NOT_FOUND,
-                   as_json=json_output)
+            failure = (f"Source not found: {source}", "NOT_FOUND", EXIT_NOT_FOUND)
+            audio_file = None
 
-        transcriber = AudioTranscriber(
-            model_name=whisper_model, output_dir=paths["transcripts"], engine=engine,
-            hf_token=os.getenv("HF_TOKEN"),
-            elevenlabs_api_key=os.getenv("ELEVENLABS_API_KEY"),
-            openai_api_key=os.getenv("OPENAI_API_KEY"),
-            num_speakers=num_speakers,
-        )
-        try:
-            result = transcriber.transcribe(str(audio_file))
-        except Exception as e:
-            _error(str(e), "ERROR", EXIT_ERROR, as_json=json_output)
-        if not keep_files and not reused:
-            Path(audio_file).unlink(missing_ok=True)
+        if audio_file is not None:
+            transcriber = AudioTranscriber(
+                model_name=whisper_model, output_dir=paths["transcripts"], engine=engine,
+                hf_token=os.getenv("HF_TOKEN"),
+                elevenlabs_api_key=os.getenv("ELEVENLABS_API_KEY"),
+                openai_api_key=os.getenv("OPENAI_API_KEY"),
+                num_speakers=num_speakers,
+            )
+            try:
+                result = transcriber.transcribe(str(audio_file))
+            except Exception as e:
+                failure = (str(e), "ERROR", EXIT_ERROR)
+            if result is not None and not keep_files and not reused:
+                Path(audio_file).unlink(missing_ok=True)
+
+    if failure:
+        _error(failure[0], failure[1], failure[2], as_json=json_output)
 
     if json_output:
         _output_json({"data": {"transcript_file": result["text_file"],
