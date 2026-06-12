@@ -94,6 +94,24 @@ class TestSummarizeFlow:
         assert "# Body" in content
         assert result["summary"] == "# Body"
 
+    def test_claude_cli_labelled_correctly_in_output(self, tmp_path):
+        """claude-cli summaries must not be attributed to 'OpenAI claude-cli'."""
+        with patch("sonopsis.summarizer.shutil.which",
+                   return_value=r"C:\fake\claude.exe"):
+            s = ContentSummarizer(model="claude-cli", output_dir=str(tmp_path))
+        s.transcription_engine = "whisper"
+        out = s._format_output("body", self._metadata())
+        assert "Claude Code CLI (subscription)" in out
+        assert "OpenAI claude-cli" not in out
+
+    def test_claude_cli_alias_shown_in_output(self, tmp_path):
+        with patch("sonopsis.summarizer.shutil.which",
+                   return_value=r"C:\fake\claude.exe"):
+            s = ContentSummarizer(model="claude-cli/haiku", output_dir=str(tmp_path))
+        s.transcription_engine = "whisper"
+        out = s._format_output("body", self._metadata())
+        assert "Claude Code CLI (haiku, subscription)" in out
+
     def test_generation_error_wrapped(self, tmp_path, monkeypatch):
         s = self._summarizer(tmp_path, monkeypatch)
         with patch.object(s, "_generate_with_retry",

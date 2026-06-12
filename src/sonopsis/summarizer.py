@@ -428,7 +428,11 @@ class ContentSummarizer:
         )
 
         # Format summarization model display name
-        if self.api_type == 'anthropic':
+        if self.api_type == 'claude-cli':
+            alias = getattr(self, 'cli_model', None)
+            summary_display = (f"Claude Code CLI ({alias}, subscription)" if alias
+                               else "Claude Code CLI (subscription)")
+        elif self.api_type == 'anthropic':
             summary_display = f"Anthropic {self.model}"
         elif self.api_type == 'openrouter':
             summary_display = f"OpenRouter: {self.model}"
