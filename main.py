@@ -200,6 +200,14 @@ Examples:
              "openai (cloud gpt-4o-transcribe-diarize) (default: %(default)s)"
     )
 
+    # Engine shortcut flags: `--parakeet` == `--engine parakeet`
+    shortcuts = parser.add_argument_group("engine shortcuts")
+    for eng in ("parakeet", "parakeet-dia", "whisper", "whisperx", "elevenlabs", "openai"):
+        shortcuts.add_argument(
+            f"--{eng}", action="store_const", const=eng, dest="engine_shortcut",
+            help=f"Shortcut for --engine {eng}"
+        )
+
     parser.add_argument(
         "--whisper-model",
         default=os.getenv("WHISPER_MODEL", defaults.get('whisper_model', 'base')),
@@ -263,6 +271,11 @@ Examples:
 
 def main():
     """Main entry point."""
+    # Forward-compatible verb syntax: `sonopsis summarise <URL>` works now;
+    # v0.3.0's typer rewrite will make verbs first-class subcommands
+    if len(sys.argv) > 1 and sys.argv[1].lower() in ("summarise", "summarize"):
+        del sys.argv[1]
+
     # Load environment variables (.env takes precedence over system env vars)
     load_dotenv(override=True)
 
@@ -274,6 +287,10 @@ def main():
     # any API keys configured
     parser = build_parser(config, has_claude_cli)
     args = parser.parse_args()
+
+    # An explicit engine shortcut (--parakeet, --openai, ...) wins
+    if getattr(args, "engine_shortcut", None):
+        args.transcription_engine = args.engine_shortcut
 
     # Check for a usable summarization backend: API keys or the Claude Code CLI
     if not os.getenv("OPENAI_API_KEY") and not os.getenv("ANTHROPIC_API_KEY") \

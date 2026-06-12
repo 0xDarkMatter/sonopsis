@@ -5,7 +5,11 @@
 Goal: rebuild the CLI surface to the [Forma Protocol](https://github.com/forma-tools/forma)
 while keeping the v0.2.0 engine/benchmark internals (`utils/`) untouched.
 
-- [ ] Typer command architecture: `sonopsis process|transcribe|summarize|engines|auth|config`
+- [x] Verb-first syntax: `sonopsis summarise <URL>` (British primary, `summarize` alias) - shipped early as a shim
+- [x] Engine shortcut flags: `sonopsis --parakeet <URL>` == `--engine parakeet` - shipped early
+- [ ] Typer command architecture: `sonopsis summarise|transcribe|engines|auth|config` (formalises the shim verbs)
+- [ ] **sonopsis SKILL** for agent orchestration, following claude-mods SKILL-RESOURCE-PROTOCOL
+      (SKILL.md + scripts/references/assets, written against the v0.3.0 command surface)
 - [ ] `sonopsis engines install <pack>` - self-managing engine packs (replaces raw `uv sync --extra`)
 - [ ] `--json` on every command; stdout = data, stderr = chrome (`Console(stderr=True)`)
 - [ ] Exit-code contract, `_error`/`_output_json` helpers, `auth login|status|logout` + keyring credentials

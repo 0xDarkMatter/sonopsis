@@ -19,7 +19,11 @@ engine pack:
 engines-all:
     uv sync --extra parakeet --extra whisper --extra diarize --extra elevenlabs --extra dev
 
-# Summarize a video or playlist (flags pass through, e.g. just run URL --engine openai)
+# Summarise a video or playlist (flags pass through, e.g. just summarise URL --engine openai)
+summarise +args:
+    uv run python main.py {{args}}
+
+# Alias for summarise
 run +args:
     uv run python main.py {{args}}
 

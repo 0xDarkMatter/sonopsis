@@ -26,9 +26,12 @@ just setup        # or without just:  uv sync --extra parakeet
 #    - Already use Claude Code (Pro/Max)? Skip this step - it's detected automatically.
 #    - Otherwise: cp .env.example .env  and add OPENAI_API_KEY or ANTHROPIC_API_KEY
 
-# 3. Summarize a video
-just run "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+# 3. Summarise a video
+uv run sonopsis summarise "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 ```
+
+Engine shortcut flags read naturally too: `sonopsis --parakeet <URL>`,
+`sonopsis summarise --openai <URL>` (equivalent to `--engine <name>`).
 
 Your transcript lands in `transcripts/`, the summary in `summaries/`. Prefer guided menus over flags? Run `uv run python sonopsis.py` instead. Everything else - speaker diarization, engine choices, playlists, custom prompts - is below.
 

@@ -140,6 +140,38 @@ class TestArgumentParser:
 # Argument parser unit tests (no subprocess)
 # ---------------------------------------------------------------------------
 
+class TestVerbAndShortcuts:
+    """The `sonopsis summarise <URL>` verb shim and --<engine> shortcut flags."""
+
+    @pytest.fixture()
+    def main_mod(self):
+        return _import_main_with_stubs()
+
+    def test_engine_shortcut_flag_parses(self, main_mod):
+        parser = main_mod.build_parser(main_mod.load_config(), False)
+        args = parser.parse_args(["https://youtu.be/x", "--parakeet"])
+        assert args.engine_shortcut == "parakeet"
+
+    def test_engine_shortcut_openai(self, main_mod):
+        parser = main_mod.build_parser(main_mod.load_config(), False)
+        args = parser.parse_args(["https://youtu.be/x", "--openai"])
+        assert args.engine_shortcut == "openai"
+
+    def test_no_shortcut_leaves_default(self, main_mod):
+        parser = main_mod.build_parser(main_mod.load_config(), False)
+        args = parser.parse_args(["https://youtu.be/x"])
+        assert args.engine_shortcut is None
+
+    def test_summarise_verb_help_exits_zero(self):
+        """`sonopsis summarise --help` must behave like `sonopsis --help`."""
+        result = subprocess.run(
+            [sys.executable, str(PROJECT_ROOT / "main.py"), "summarise", "--help"],
+            capture_output=True, text=True, cwd=str(PROJECT_ROOT),
+        )
+        assert result.returncode == 0
+        assert "usage" in result.stdout.lower()
+
+
 class TestArgparseUnit:
     """Unit-test the argument parser directly without running main()."""
 
