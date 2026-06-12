@@ -77,3 +77,33 @@ class TestProseFiles:
         content = file.read_text(encoding='utf-8')
         assert len(content) > 50, "speaker_identification.md seems too short"
         assert "SPEAKER" in content, "speaker_identification.md missing SPEAKER reference"
+
+
+class TestTemplateLint:
+    """Every {placeholder} in every analysis template must be one the code
+    actually supplies. str.format raises KeyError on unknown placeholders
+    (crash at summary time) but silently IGNORES unused kwargs - which is how
+    summaries shipped without a transcript until v0.3.0."""
+
+    SUPPLIED = {"title", "uploader", "duration", "url", "video_id"}
+
+    def _templates(self, prose_dir):
+        files = sorted((prose_dir / "prompts").glob("analysis_*.md"))
+        assert files, "no analysis templates found"
+        return files
+
+    def test_all_placeholders_are_supplied(self, prose_dir):
+        import re
+        for template in self._templates(prose_dir):
+            content = template.read_text(encoding="utf-8")
+            placeholders = set(re.findall(r"\{([a-z_]+)\}", content))
+            unknown = placeholders - self.SUPPLIED
+            assert not unknown, \
+                f"{template.name} uses placeholders the code never supplies: {unknown}"
+
+    def test_templates_format_cleanly(self, prose_dir):
+        for template in self._templates(prose_dir):
+            content = template.read_text(encoding="utf-8")
+            # Must not raise KeyError/IndexError
+            content.format(title="t", uploader="u", duration="1m",
+                           url="https://youtu.be/x", video_id="x")
