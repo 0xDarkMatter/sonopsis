@@ -323,14 +323,15 @@ class TestTranscribeCommand:
 
 
 class TestEnginesInstall:
-    def test_install_invokes_uv_inexact(self):
+    @pytest.mark.parametrize("pack", ["parakeet", "whisper", "diarize", "elevenlabs"])
+    def test_install_invokes_uv_inexact(self, pack):
         ok = type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
         with patch("sonopsis.cli.subprocess.run", return_value=ok) as run_mock:
-            result = runner.invoke(app, ["engines", "install", "whisper"])
+            result = runner.invoke(app, ["engines", "install", pack])
         assert result.exit_code == 0
         cmd = run_mock.call_args.args[0]
         assert cmd[:3] == ["uv", "sync", "--inexact"]
-        assert "whisper" in cmd
+        assert cmd[-2:] == ["--extra", pack]
 
     def test_install_failure_surfaces_stderr(self):
         bad = type("R", (), {"returncode": 1, "stdout": "", "stderr": "resolver boom"})()
