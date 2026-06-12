@@ -62,4 +62,4 @@ install = "uv tool install --editable .[parakeet]"
 env-key = "OPENAI_API_KEY"
 api-url = "https://platform.openai.com/docs"
 setup-notes = "Summarization via Claude Code CLI (no key) or OPENAI/ANTHROPIC/OPENROUTER API keys; optional ELEVENLABS_API_KEY and HF_TOKEN for cloud transcription and diarization"
-e2e_tests = 3
+e2e_tests = 4

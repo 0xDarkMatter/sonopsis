@@ -108,6 +108,39 @@ class TestFullPipeline:
         assert "elephant" in result['text'].lower()
         assert Path(result['text_file']).exists()
 
+    def test_summary_reflects_transcript_content(self, tmp_path):
+        """Feed the summarizer a transcript containing a canary fact that no
+        model could know from metadata alone - the summary must surface it.
+
+        Regression guard for the v0.3.0 bug where prompt templates lacked a
+        transcript placeholder and every summary was confabulated from the
+        video title."""
+        if not _backend_available():
+            pytest.skip("No summarization backend configured")
+
+        sys.path.insert(0, str(PROJECT_ROOT))
+        from sonopsis.summarizer import ContentSummarizer
+
+        model = "claude-cli/haiku" if shutil.which("claude") else (
+            "claude-haiku-4-5-20251001" if os.getenv("ANTHROPIC_API_KEY") else "gpt-4o-mini"
+        )
+        transcript = (
+            "Welcome back to the channel. Today I finally measured the "
+            "resonance constant of my prototype - it came out at exactly "
+            "73.42 kilohertz, which I'm calling the Zorblatt frequency. "
+            "That number is the whole reason this build works."
+        )
+        summarizer = ContentSummarizer(model=model, output_dir=str(tmp_path))
+        result = summarizer.summarize(
+            transcript,
+            {"title": "Workshop log", "uploader": "Test", "duration": 30,
+             "url": TEST_VIDEO_URL, "analysis_mode": "basic"},
+            analysis_mode="basic",
+        )
+        summary = result["summary"].lower()
+        assert "73.42" in summary or "zorblatt" in summary, \
+            f"Summary ignored the transcript: {summary[:400]}"
+
     def test_cached_audio_reused_when_noninteractive(self, tmp_path):
         """A second download of the same video must auto-reuse the cached
         audio without blocking on input() when stdin is not a terminal."""
