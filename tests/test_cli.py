@@ -132,6 +132,77 @@ class TestSubapps:
         assert "paths" in envelope["data"]
 
 
+class TestTranscribeCommand:
+    def test_local_file_not_found_exit_code(self, tmp_path):
+        result = runner.invoke(app, ["transcribe", str(tmp_path / "missing.mp3")])
+        assert result.exit_code == 3  # EXIT_NOT_FOUND
+
+    def test_local_file_transcribes(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        audio = tmp_path / "talk.mp3"
+        audio.write_bytes(b"fake")
+        fake = {"text": "hello world", "language": "en", "text_file": str(tmp_path / "t.md")}
+        with patch("sonopsis.transcriber.AudioTranscriber.__init__", return_value=None), \
+             patch("sonopsis.transcriber.AudioTranscriber.transcribe", return_value=fake):
+            result = runner.invoke(app, ["transcribe", str(audio), "--json"])
+        assert result.exit_code == 0
+        envelope = json.loads(result.stdout)
+        assert envelope["data"]["characters"] == len("hello world")
+
+    def test_pre_existing_local_file_never_deleted(self, tmp_path, monkeypatch):
+        """transcribe must not delete a user's own audio file after use."""
+        monkeypatch.chdir(tmp_path)
+        audio = tmp_path / "keep-me.mp3"
+        audio.write_bytes(b"fake")
+        fake = {"text": "x", "language": "en", "text_file": "t.md"}
+        with patch("sonopsis.transcriber.AudioTranscriber.__init__", return_value=None), \
+             patch("sonopsis.transcriber.AudioTranscriber.transcribe", return_value=fake):
+            runner.invoke(app, ["transcribe", str(audio)])
+        assert audio.exists()
+
+    def test_unknown_engine_validation(self):
+        result = runner.invoke(app, ["transcribe", "https://youtu.be/x", "--engine", "bogus"])
+        assert result.exit_code == 4
+
+    def test_engine_failure_maps_to_error_exit(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        audio = tmp_path / "a.mp3"
+        audio.write_bytes(b"fake")
+        with patch("sonopsis.transcriber.AudioTranscriber.__init__", return_value=None), \
+             patch("sonopsis.transcriber.AudioTranscriber.transcribe",
+                   side_effect=Exception("engine exploded")):
+            result = runner.invoke(app, ["transcribe", str(audio), "--json"])
+        assert result.exit_code == 1
+        assert json.loads(result.stdout)["error"]["message"] == "engine exploded"
+
+
+class TestEnginesInstall:
+    def test_install_invokes_uv_inexact(self):
+        ok = type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+        with patch("sonopsis.cli.subprocess.run", return_value=ok) as run_mock:
+            result = runner.invoke(app, ["engines", "install", "whisper"])
+        assert result.exit_code == 0
+        cmd = run_mock.call_args.args[0]
+        assert cmd[:3] == ["uv", "sync", "--inexact"]
+        assert "whisper" in cmd
+
+    def test_install_failure_surfaces_stderr(self):
+        bad = type("R", (), {"returncode": 1, "stdout": "", "stderr": "resolver boom"})()
+        with patch("sonopsis.cli.subprocess.run", return_value=bad):
+            result = runner.invoke(app, ["engines", "install", "whisper", "--json"])
+        assert result.exit_code == 1
+        assert "resolver boom" in json.loads(result.stdout)["error"]["message"]
+
+
+class TestJsonErrorEnvelopes:
+    def test_validation_error_envelope_shape(self):
+        result = runner.invoke(app, ["summarise", "nonsense", "--json"])
+        assert result.exit_code == 4
+        envelope = json.loads(result.stdout)
+        assert envelope["error"]["code"] == "VALIDATION_ERROR"
+        assert envelope["error"]["details"]["url"] == "nonsense"
+
+
 class TestLegacyShims:
     """run() rewrites pre-0.3.0 argv shapes before typer sees them."""
 
