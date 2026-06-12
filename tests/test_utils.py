@@ -3,7 +3,7 @@ Test utility functions.
 """
 
 import pytest
-from utils.summarizer import ContentSummarizer
+from sonopsis.summarizer import ContentSummarizer
 
 
 class TestSummarizerUtils:
@@ -118,7 +118,7 @@ class TestSummarizerPromptLoading:
         import sys
         sys.path.insert(0, str(project_root))
 
-        from utils.summarizer import ContentSummarizer
+        from sonopsis.summarizer import ContentSummarizer
 
         # Create a summarizer instance (won't actually call API)
         # Just testing that _load_system_prompt works

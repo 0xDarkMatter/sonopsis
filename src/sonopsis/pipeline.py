@@ -14,10 +14,10 @@ from typing import Any, Dict, Optional
 
 from colorama import Fore, Style
 
-from utils.downloader import YouTubeDownloader
-from utils.speakers import infer_speaker_count
-from utils.transcriber import AudioTranscriber
-from utils.summarizer import ContentSummarizer
+from sonopsis.downloader import YouTubeDownloader
+from sonopsis.speakers import infer_speaker_count
+from sonopsis.transcriber import AudioTranscriber
+from sonopsis.summarizer import ContentSummarizer
 
 # Engines that accept a num_speakers hint
 DIARIZING_ENGINES = {"parakeet-dia"}

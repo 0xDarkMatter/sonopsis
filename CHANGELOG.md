@@ -3,6 +3,50 @@
 All notable changes to Sonopsis are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow semver.
 
+## [0.3.0] - 2026-06-12
+
+The agent-first CLI rewrite: a typer command architecture with JSON output,
+semantic exit codes and keyring auth, replacing the argparse single-command
+app. Engine and benchmark internals carry over unchanged; every pre-0.3.0
+invocation keeps working through compatibility shims.
+
+### Added
+
+- **Typer CLI** (`src/sonopsis/cli.py`): `summarise` (playlists included),
+  `transcribe` (URLs *and local audio files* - new capability), `engines
+  list|install`, `models list`, `auth login|status|logout`, `config show`,
+  `tui`.
+- **`--json` everywhere**: `{data, meta}` envelopes on stdout; errors as
+  `{"error": {code, message}}`. stdout carries only data - all progress and
+  chrome go to stderr, so piped output stays clean.
+- **Semantic exit codes**: 0 success, 1 error, 2 auth required, 3 not found,
+  4 validation.
+- **Keyring credential store** (`sonopsis auth login <provider>`): resolution
+  order env > .env > keyring, providers openai/anthropic/openrouter/
+  elevenlabs/hf; backfilled into the environment at startup so engines need
+  no changes.
+- **`sonopsis engines install <pack>`**: self-managing engine packs - no more
+  raw `uv sync --extra` on the user surface.
+- **Agent skill** (`skills/sonopsis/`): SKILL.md + benchmark-backed engine
+  selection reference for AI-assistant orchestration.
+
+### Changed
+
+- `src/sonopsis/` package layout with a hatchling build; prompt templates
+  (`prose/`) now ship inside the package, fixing the editable-install-only
+  packaging limitation.
+- The interactive interface is `sonopsis tui`; its ASCII-art banner is
+  replaced by a quiet one-line header.
+- Compatibility shims: `sonopsis <URL>` implies `summarise`; engine shortcut
+  flags and the old `--transcription-engine`/`--gpt-model` spellings are
+  rewritten on the way in.
+
+### Removed
+
+- Top-level `main.py`/`sonopsis.py` entry scripts and the `utils/` package
+  (now `src/sonopsis/`). Library imports change from `utils.X` to
+  `sonopsis.X` - the only breaking change for programmatic users.
+
 ## [0.2.0] - 2026-06-12
 
 The "engines and evidence" release: three new transcription engines, a

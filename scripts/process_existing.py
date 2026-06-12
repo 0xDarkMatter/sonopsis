@@ -15,9 +15,9 @@ from colorama import init, Fore, Style
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from utils.transcriber import AudioTranscriber
-from utils.summarizer import ContentSummarizer, claude_cli_available
-from utils.models import DEFAULT_API_MODEL, DEFAULT_CLI_MODEL
+from sonopsis.transcriber import AudioTranscriber
+from sonopsis.summarizer import ContentSummarizer, claude_cli_available
+from sonopsis.models import DEFAULT_API_MODEL, DEFAULT_CLI_MODEL
 
 # Initialize colorama
 init(autoreset=True)

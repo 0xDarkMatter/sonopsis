@@ -1,247 +1,160 @@
 """
-CLI tests for sonopsis main.py argument parser.
+CLI tests for the typer application (src/sonopsis/cli.py).
 
-Heavy dependencies (whisper, yt_dlp) are stubbed via sys.modules
-so tests run without torch/CUDA installed.
+Uses typer's CliRunner - no subprocesses, no network. Pipeline execution is
+mocked; what's under test is the command surface: parsing, validation, exit
+codes, JSON envelopes, and the legacy-argv shims.
 """
 
+import json
 import sys
-import types
-import subprocess
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
+
 import pytest
+from typer.testing import CliRunner
 
-PROJECT_ROOT = Path(__file__).parent.parent
+from sonopsis import __version__
+from sonopsis.cli import ENGINES, app, run
 
-
-# ---------------------------------------------------------------------------
-# Helpers to stub heavy imports before importing main
-# ---------------------------------------------------------------------------
-
-def _stub_heavy_modules():
-    """Install lightweight stubs for modules that require torch/whisper/etc."""
-    stubs = {
-        "whisper": MagicMock(),
-        "yt_dlp": MagicMock(),
-        "elevenlabs": MagicMock(),
-    }
-    for name, mock in stubs.items():
-        sys.modules.setdefault(name, mock)
+runner = CliRunner()
 
 
-def _import_main_with_stubs():
-    """Import main.py with heavy deps stubbed. Returns the module."""
-    _stub_heavy_modules()
-    # Remove cached module so we get a fresh import with our stubs active
-    sys.modules.pop("main", None)
-    sys.modules.pop("utils", None)
-    sys.modules.pop("utils.downloader", None)
-    sys.modules.pop("utils.transcriber", None)
-    sys.modules.pop("utils.summarizer", None)
+class TestBasics:
+    def test_version(self):
+        result = runner.invoke(app, ["--version"])
+        assert result.exit_code == 0
+        assert __version__ in result.output
 
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("main", PROJECT_ROOT / "main.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    def test_no_args_shows_help(self):
+        result = runner.invoke(app, [])
+        assert "summarise" in result.output
+
+    def test_help_lists_subcommands(self):
+        result = runner.invoke(app, ["--help"])
+        for cmd in ("summarise", "transcribe", "engines", "models", "auth", "config"):
+            assert cmd in result.output
 
 
-# ---------------------------------------------------------------------------
-# Argument parser tests
-# ---------------------------------------------------------------------------
+class TestSummariseValidation:
+    def test_invalid_url_exits_validation(self):
+        result = runner.invoke(app, ["summarise", "not-a-url"])
+        assert result.exit_code == 4  # EXIT_VALIDATION
 
-class TestArgumentParser:
-    """Test main.py argparse configuration via subprocess (avoids import issues)."""
+    def test_unknown_engine_exits_validation(self):
+        result = runner.invoke(app, ["summarise", "https://youtu.be/x", "--engine", "nope"])
+        assert result.exit_code == 4
 
-    def _run(self, *args, env=None):
-        """Run main.py via subprocess and return (returncode, stdout, stderr)."""
-        import os
-        run_env = os.environ.copy()
-        if env:
-            run_env.update(env)
-        result = subprocess.run(
-            [sys.executable, str(PROJECT_ROOT / "main.py"), *args],
-            capture_output=True,
-            text=True,
-            env=run_env,
-            cwd=str(PROJECT_ROOT),
+    def test_no_backend_exits_auth_required(self, monkeypatch):
+        for var in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY"):
+            monkeypatch.delenv(var, raising=False)
+        with patch("sonopsis.cli.claude_cli_available", return_value=False), \
+             patch("sonopsis.cli._startup"):
+            result = runner.invoke(app, ["summarise", "https://youtu.be/dQw4w9WgXcQ"])
+        assert result.exit_code == 2  # EXIT_AUTH_REQUIRED
+
+
+class TestSummariseExecution:
+    def _invoke(self, args, process_result=None):
+        process_result = process_result or {
+            "success": True, "url": "u", "title": "T",
+            "transcript_file": "t.md", "summary_file": "s.md",
+        }
+        with patch("sonopsis.cli._startup"), \
+             patch("sonopsis.cli._require_summarization_backend"), \
+             patch("sonopsis.pipeline.process_video", return_value=process_result) as pv, \
+             patch("sonopsis.downloader.YouTubeDownloader.is_playlist", return_value=False):
+            result = runner.invoke(app, args)
+        return result, pv
+
+    def test_summarise_success_prints_summary_path(self):
+        result, _ = self._invoke(["summarise", "https://youtu.be/dQw4w9WgXcQ"])
+        assert result.exit_code == 0
+        assert "s.md" in result.output
+
+    def test_summarise_json_envelope(self):
+        result, _ = self._invoke(["summarise", "https://youtu.be/dQw4w9WgXcQ", "--json"])
+        assert result.exit_code == 0
+        envelope = json.loads(result.stdout)
+        assert envelope["data"]["summary_file"] == "s.md"
+        assert envelope["meta"]["succeeded"] == 1
+
+    def test_summarise_failure_exit_code(self):
+        result, _ = self._invoke(
+            ["summarise", "https://youtu.be/dQw4w9WgXcQ"],
+            process_result={"success": False, "url": "u", "error": "boom"},
         )
-        return result.returncode, result.stdout, result.stderr
+        assert result.exit_code == 1
 
-    def test_help_exits_zero(self):
-        """--help should print usage and exit 0."""
-        code, stdout, stderr = self._run("--help")
-        assert code == 0
-        assert "usage" in stdout.lower() or "url" in stdout.lower()
+    def test_summarize_alias(self):
+        result, _ = self._invoke(["summarize", "https://youtu.be/dQw4w9WgXcQ"])
+        assert result.exit_code == 0
 
-    def test_missing_url_exits_nonzero(self):
-        """Running without URL should exit with non-zero (argparse error)."""
-        code, stdout, stderr = self._run()
-        assert code != 0
-
-    def test_no_api_key_exits_one(self):
-        """Missing API keys should exit 1 with an informative message."""
-        import os
-        env = os.environ.copy()
-        env.pop("OPENAI_API_KEY", None)
-        env.pop("ANTHROPIC_API_KEY", None)
-        result = subprocess.run(
-            [sys.executable, str(PROJECT_ROOT / "main.py"), "https://youtube.com/watch?v=fake"],
-            capture_output=True,
-            text=True,
-            env=env,
-            cwd=str(PROJECT_ROOT),
-        )
-        assert result.returncode == 1
-
-    def test_invalid_whisper_model_exits_nonzero(self):
-        """Invalid --whisper-model choice should exit with non-zero."""
-        code, stdout, stderr = self._run(
-            "https://youtube.com/watch?v=fake",
-            "--whisper-model", "invalid_model",
-        )
-        assert code != 0
-
-    def test_invalid_analysis_mode_exits_nonzero(self):
-        """Invalid --analysis-mode choice should exit with non-zero."""
-        code, stdout, stderr = self._run(
-            "https://youtube.com/watch?v=fake",
-            "--analysis-mode", "super_advanced",
-        )
-        assert code != 0
-
-    def test_invalid_transcription_engine_exits_nonzero(self):
-        """Invalid --transcription-engine choice should exit non-zero."""
-        code, stdout, stderr = self._run(
-            "https://youtube.com/watch?v=fake",
-            "--transcription-engine", "gpt4o",
-        )
-        assert code != 0
-
-    def test_help_shows_whisper_model_choices(self):
-        """--help output should document whisper model choices."""
-        code, stdout, _ = self._run("--help")
-        assert code == 0
-        assert "whisper-model" in stdout or "whisper_model" in stdout
-
-    def test_help_shows_analysis_mode_choices(self):
-        """--help output should document analysis-mode choices."""
-        code, stdout, _ = self._run("--help")
-        assert "analysis-mode" in stdout or "analysis_mode" in stdout
-
-    def test_help_shows_transcription_engine(self):
-        """--help should mention transcription-engine."""
-        code, stdout, _ = self._run("--help")
-        assert "transcription" in stdout.lower()
+    def test_engine_passed_to_pipeline(self):
+        _, pv = self._invoke(["summarise", "https://youtu.be/dQw4w9WgXcQ",
+                              "--engine", "parakeet"])
+        assert pv.call_args.kwargs["transcription_engine"] == "parakeet"
 
 
-# ---------------------------------------------------------------------------
-# Argument parser unit tests (no subprocess)
-# ---------------------------------------------------------------------------
+class TestSubapps:
+    def test_engines_list_json(self):
+        result = runner.invoke(app, ["engines", "list", "--json"])
+        assert result.exit_code == 0
+        envelope = json.loads(result.stdout)
+        names = {row["engine"] for row in envelope["data"]}
+        assert names == set(ENGINES)
 
-class TestVerbAndShortcuts:
-    """The `sonopsis summarise <URL>` verb shim and --<engine> shortcut flags."""
+    def test_engines_install_rejects_unknown_pack(self):
+        result = runner.invoke(app, ["engines", "install", "nonsense"])
+        assert result.exit_code == 4
 
-    @pytest.fixture()
-    def main_mod(self):
-        return _import_main_with_stubs()
+    def test_models_list_json(self):
+        result = runner.invoke(app, ["models", "list", "--all", "--json"])
+        assert result.exit_code == 0
+        envelope = json.loads(result.stdout)
+        assert envelope["meta"]["count"] >= 5
 
-    def test_engine_shortcut_flag_parses(self, main_mod):
-        parser = main_mod.build_parser(main_mod.load_config(), False)
-        args = parser.parse_args(["https://youtu.be/x", "--parakeet"])
-        assert args.engine_shortcut == "parakeet"
+    def test_auth_status_json(self):
+        result = runner.invoke(app, ["auth", "status", "--json"])
+        assert result.exit_code == 0
+        envelope = json.loads(result.stdout)
+        assert "openai" in envelope["data"]
+        assert "claude-cli" in envelope["data"]
 
-    def test_engine_shortcut_openai(self, main_mod):
-        parser = main_mod.build_parser(main_mod.load_config(), False)
-        args = parser.parse_args(["https://youtu.be/x", "--openai"])
-        assert args.engine_shortcut == "openai"
+    def test_auth_login_unknown_provider(self):
+        result = runner.invoke(app, ["auth", "login", "nonsense", "--key", "x"])
+        assert result.exit_code == 4
 
-    def test_no_shortcut_leaves_default(self, main_mod):
-        parser = main_mod.build_parser(main_mod.load_config(), False)
-        args = parser.parse_args(["https://youtu.be/x"])
-        assert args.engine_shortcut is None
-
-    def test_summarise_verb_help_exits_zero(self):
-        """`sonopsis summarise --help` must behave like `sonopsis --help`."""
-        result = subprocess.run(
-            [sys.executable, str(PROJECT_ROOT / "main.py"), "summarise", "--help"],
-            capture_output=True, text=True, cwd=str(PROJECT_ROOT),
-        )
-        assert result.returncode == 0
-        assert "usage" in result.stdout.lower()
+    def test_config_show_json(self):
+        result = runner.invoke(app, ["config", "show", "--json"])
+        assert result.exit_code == 0
+        envelope = json.loads(result.stdout)
+        assert "defaults" in envelope["data"]
+        assert "paths" in envelope["data"]
 
 
-class TestArgparseUnit:
-    """Unit-test the argument parser directly without running main()."""
+class TestLegacyShims:
+    """run() rewrites pre-0.3.0 argv shapes before typer sees them."""
 
-    @pytest.fixture(autouse=True)
-    def _setup(self):
-        """Stub heavy modules and import main."""
-        _stub_heavy_modules()
-        import importlib.util
-        import os
-        # Temporarily patch env so load_dotenv doesn't interfere
-        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}):
-            spec = importlib.util.spec_from_file_location(
-                "main_unit", PROJECT_ROOT / "main.py"
-            )
-            mod = importlib.util.module_from_spec(spec)
+    def _shimmed_argv(self, argv):
+        captured = {}
+        with patch("sonopsis.cli.app", side_effect=lambda: captured.update(argv=sys.argv[1:])):
+            old = sys.argv
             try:
-                spec.loader.exec_module(mod)
-            except SystemExit:
-                pass
-            self.main_module = mod
+                sys.argv = ["sonopsis"] + argv
+                run()
+            finally:
+                sys.argv = old
+        return captured["argv"]
 
-    def test_parser_url_is_required(self):
-        """Parser should require a positional URL argument."""
-        import argparse
-        # Reconstruct a standalone parser to test choices without side-effects
-        parser = argparse.ArgumentParser()
-        parser.add_argument("url")
-        parser.add_argument("--whisper-model", choices=["tiny", "base", "small", "medium", "large"], default="base")
-        parser.add_argument("--analysis-mode", choices=["basic", "advanced"], default="basic")
-        parser.add_argument("--transcription-engine", choices=["whisper", "whisperx", "elevenlabs"], default="whisper")
-        parser.add_argument("--keep-files", action="store_true")
-        parser.add_argument("--start-from", type=int, default=1)
+    def test_bare_url_becomes_summarise(self):
+        assert self._shimmed_argv(["https://youtu.be/x"])[0] == "summarise"
 
-        args = parser.parse_args(["https://youtube.com/watch?v=test"])
-        assert args.url == "https://youtube.com/watch?v=test"
+    def test_engine_shortcut_flag(self):
+        argv = self._shimmed_argv(["summarise", "u", "--parakeet"])
+        assert argv[-2:] == ["--engine", "parakeet"]
 
-    def test_parser_defaults(self):
-        """Verify default values for optional arguments."""
-        import argparse
-        parser = argparse.ArgumentParser()
-        parser.add_argument("url")
-        parser.add_argument("--whisper-model", choices=["tiny", "base", "small", "medium", "large"], default="base")
-        parser.add_argument("--analysis-mode", choices=["basic", "advanced"], default="basic")
-        parser.add_argument("--transcription-engine", choices=["whisper", "whisperx", "elevenlabs"], default="whisper")
-        parser.add_argument("--keep-files", action="store_true")
-        parser.add_argument("--start-from", type=int, default=1)
-
-        args = parser.parse_args(["https://youtube.com/watch?v=test"])
-        assert args.whisper_model == "base"
-        assert args.analysis_mode == "basic"
-        assert args.transcription_engine == "whisper"
-        assert args.keep_files is False
-        assert args.start_from == 1
-
-    def test_parser_keep_files_flag(self):
-        """--keep-files should set keep_files=True."""
-        import argparse
-        parser = argparse.ArgumentParser()
-        parser.add_argument("url")
-        parser.add_argument("--keep-files", action="store_true")
-
-        args = parser.parse_args(["https://example.com", "--keep-files"])
-        assert args.keep_files is True
-
-    def test_parser_start_from_integer(self):
-        """--start-from should accept an integer."""
-        import argparse
-        parser = argparse.ArgumentParser()
-        parser.add_argument("url")
-        parser.add_argument("--start-from", type=int, default=1)
-
-        args = parser.parse_args(["https://example.com", "--start-from", "5"])
-        assert args.start_from == 5
+    def test_old_flag_spellings(self):
+        argv = self._shimmed_argv(["summarise", "u", "--transcription-engine", "whisper",
+                                   "--gpt-model", "claude-cli"])
+        assert "--engine" in argv and "--model" in argv
+        assert "--transcription-engine" not in argv and "--gpt-model" not in argv

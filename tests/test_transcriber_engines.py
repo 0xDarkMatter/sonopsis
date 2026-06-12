@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from utils.transcriber import AudioTranscriber
+from sonopsis.transcriber import AudioTranscriber
 
 HAS_ONNX_ASR = importlib.util.find_spec("onnx_asr") is not None
 

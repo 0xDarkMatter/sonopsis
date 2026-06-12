@@ -9,9 +9,11 @@
 
 # Sonopsis
 
-**Video/Audio Summariser** - Download · Transcribe · Summarize
+[![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-137%20passing-brightgreen.svg)](tests/)
 
-A Python application that downloads YouTube videos, transcribes them across six engines (local and cloud), and generates comprehensive summaries and notes using Claude/GPT models - or your Claude subscription, no API key needed.
+> Video/audio summariser - download YouTube videos, transcribe across six engines (local and cloud), and generate AI summaries using Claude/GPT models or your Claude subscription, no API key needed.
 
 ## Quick Start
 
@@ -33,9 +35,18 @@ uv run sonopsis summarise "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 Engine shortcut flags read naturally too: `sonopsis --parakeet <URL>`,
 `sonopsis summarise --openai <URL>` (equivalent to `--engine <name>`).
 
-Your transcript lands in `transcripts/`, the summary in `summaries/`. Prefer guided menus over flags? Run `uv run python sonopsis.py` instead. Everything else - speaker diarization, engine choices, playlists, custom prompts - is below.
+Your transcript lands in `transcripts/`, the summary in `summaries/`. Prefer guided menus over flags? Run `sonopsis tui` instead. Everything else - speaker diarization, engine choices, playlists, custom prompts - is below.
 
 ## Recent Updates
+
+**v0.3.0** (June 2026)
+
+*   🚀 **Agent-first CLI rewrite** - A typer command architecture replaces the argparse app: `sonopsis summarise|transcribe|engines|models|auth|config|tui`, with `--json` `{data, meta}` envelopes, semantic exit codes, and a strict stdout-is-data / stderr-is-progress split. Every pre-0.3.0 invocation still works via shims.
+*   🆕 **`sonopsis transcribe`** - Transcription without summarization, for YouTube URLs *and local audio files*.
+*   🔧 **`sonopsis engines install <pack>`** - Self-managing engine packs retire raw `uv sync --extra` from the user surface; `engines list` shows what's installed and what each engine still needs.
+*   🛡️ **Keyring auth** - `sonopsis auth login <provider>` stores keys in the OS keyring (resolution: env > .env > keyring); `auth status` shows every backend at a glance.
+*   📦 **Proper packaging** - `src/sonopsis/` layout with hatchling; prompt templates ship inside the package, so non-editable installs finally work.
+*   🤖 **Agent skill** - `skills/sonopsis/` documents the command surface and benchmark-backed engine selection for AI-assistant orchestration.
 
 **v0.2.0** (June 2026)
 
@@ -198,30 +209,27 @@ HF_TOKEN=your_huggingface_token_here
 
 ```
 Sonopsis/
-├── sonopsis.py              # Interactive menu interface (recommended)
-├── main.py                  # Command-line interface
 ├── pyproject.toml           # Project metadata + dependencies (uv-managed)
 ├── config.yaml              # Non-secret defaults (models, paths)
+├── justfile                 # Friendly task runner (just setup / just test / ...)
 ├── .env.example             # API key template
 ├── LICENSE                  # MIT license
-├── utils/                   # Core modules
-│   ├── downloader.py        # YouTube video/audio download
-│   ├── transcriber.py       # Whisper/WhisperX/ElevenLabs transcription
-│   ├── summarizer.py        # GPT/Claude/OpenRouter/Claude-CLI summarization
+├── src/sonopsis/            # The package
+│   ├── cli.py               # Typer CLI: summarise/transcribe + engines/models/auth/config
+│   ├── tui.py               # Interactive menu interface
 │   ├── pipeline.py          # Shared download->transcribe->summarize flow
+│   ├── downloader.py        # YouTube video/audio download
+│   ├── transcriber.py       # All six transcription engines
+│   ├── summarizer.py        # GPT/Claude/OpenRouter/Claude-CLI summarization
 │   ├── models.py            # AI model registry (IDs, costs, limits)
-│   └── config.py            # config.yaml loader
-├── prose/                   # LLM prompts and protocols
-│   ├── prompts/system.md            # AI system prompt
-│   ├── prompts/analysis_basic.md    # Basic analysis prompt
-│   ├── prompts/analysis_advanced.md # Advanced analysis prompt
-│   └── protocols/speaker_identification.md
-├── scripts/                 # Utility scripts
-│   ├── compare_models.py    # Compare AI model outputs on one transcript
-│   └── process_existing.py  # Transcribe + summarize a local audio file
-├── tests/                   # Unit tests (pytest) + e2e suite
-├── docs/                    # Documentation
-│   └── PLAN.md              # Future enhancements
+│   ├── speakers.py          # Gated LLM speaker-count inference
+│   ├── credentials.py       # Keyring credential store (sonopsis auth ...)
+│   ├── config.py            # config.yaml loader
+│   └── prose/               # LLM prompt templates (ships with the package)
+├── scripts/                 # Benchmark harnesses + utility scripts
+├── benchmarks/              # Known-good corpora + committed WER/DER results
+├── tests/                   # Unit tests (pytest) + gated e2e suite
+├── docs/PLAN.md             # Roadmap
 ├── downloads/               # Temporary audio files (auto-cleaned)
 ├── transcripts/             # Generated transcripts
 └── summaries/               # AI-generated summaries
@@ -229,74 +237,72 @@ Sonopsis/
 
 ## Usage
 
-### Interactive Mode (Recommended)
+### Key Commands
 
-```bash
-python sonopsis.py
-```
+| Command | Description |
+|---|---|
+| `sonopsis summarise <URL>` | Full pipeline: download → transcribe → summarise (playlists too) |
+| `sonopsis transcribe <URL\|file>` | Transcription only - URLs or local audio files |
+| `sonopsis engines list` | Engine availability, type, and what each still needs |
+| `sonopsis engines install <pack>` | Install an engine pack (parakeet / whisper / diarize / elevenlabs) |
+| `sonopsis models list` | Usable summarization models (add `--all` for everything) |
+| `sonopsis auth status` | Which providers are configured and where the credential lives |
+| `sonopsis auth login <provider>` | Store a key in the OS keyring (openai / anthropic / elevenlabs / openrouter / hf) |
+| `sonopsis config show` | Effective configuration after config.yaml merge |
+| `sonopsis tui` | Interactive guided menus |
 
-**Features:**
-- Step-by-step guided interface with beautiful colored menus
-- Interactive model selection with descriptions
-- Shows already-downloaded Whisper models
-- Clear cost and speed information with visual tags
-- Analysis mode selection (Basic or Advanced)
-- Process multiple videos in one session
-
-### Command Line Mode
-
-```bash
-python main.py <YouTube_URL>
-```
+Every command supports `--json` for a `{data, meta}` envelope on stdout - progress
+and chrome always go to stderr, so piped output stays clean. Exit codes: 0 success,
+1 error, 2 auth required, 3 not found, 4 validation.
 
 ### Examples
 
 ```bash
 # Process a single video with default settings (local Whisper)
-python main.py https://www.youtube.com/watch?v=dQw4w9WgXcQ
+sonopsis https://www.youtube.com/watch?v=dQw4w9WgXcQ
 
 # Summarize on your Claude subscription via the Claude Code CLI (no API key)
-python main.py <URL> --model claude-cli
-python main.py <URL> --model claude-cli/opus
+sonopsis <URL> --model claude-cli
+sonopsis <URL> --model claude-cli/opus
 
 # Process an entire playlist
-python main.py "https://www.youtube.com/playlist?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf"
+sonopsis "https://www.youtube.com/playlist?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf"
 
 # Local diarization: Parakeet + pyannote, auto-inferring the speaker count
-python main.py <URL> --engine parakeet-dia --auto-speakers
+sonopsis <URL> --engine parakeet-dia --auto-speakers
 
 # Local diarization with a known speaker count (measurably more accurate)
-python main.py <URL> --engine parakeet-dia --num-speakers 2
+sonopsis <URL> --engine parakeet-dia --num-speakers 2
 
 # Use WhisperX for speaker diarization (local, free)
-python main.py <URL> --engine whisperx
+sonopsis <URL> --engine whisperx
 
 # Use ElevenLabs for cloud transcription (99 languages, speaker diarization)
-python main.py <URL> --engine elevenlabs
+sonopsis <URL> --engine elevenlabs
 
 # Use OpenAI gpt-4o-transcribe-diarize (best speaker counting measured)
-python main.py <URL> --engine openai
+sonopsis <URL> --engine openai
 
 # Use a larger Whisper model for better accuracy
-python main.py https://youtu.be/dQw4w9WgXcQ --whisper-model small
+sonopsis https://youtu.be/dQw4w9WgXcQ --whisper-model small
 
 # Use Claude Sonnet for highest quality summaries
-python main.py <URL> --model claude-sonnet-4-6
+sonopsis <URL> --model claude-sonnet-4-6
 
 # Use GPT-5.1 for complex reasoning
-python main.py <URL> --model gpt-5.1
+sonopsis <URL> --model gpt-5.1
 
 # Use Kimi K2 (long context specialist via OpenRouter)
-python main.py <URL> --model openrouter/moonshot/kimi-k2
+sonopsis <URL> --model openrouter/moonshot/kimi-k2
 
 # Use GLM 4.6 Plus (Chinese + multilingual via OpenRouter)
-python main.py <URL> --model openrouter/zhipuai/glm-4.6-plus
+sonopsis <URL> --model openrouter/zhipuai/glm-4.6-plus
 
 # Process playlist with ElevenLabs transcription and Claude
-python main.py <PLAYLIST_URL> --engine elevenlabs --model claude-haiku-4-5-20251001
+sonopsis <PLAYLIST_URL> --engine elevenlabs --model claude-haiku-4-5-20251001
 
 # Keep downloaded audio files
-python main.py <URL> --keep-files
+sonopsis <URL> --keep-files
 ```
 
 ### Command Line Options

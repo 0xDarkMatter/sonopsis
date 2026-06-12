@@ -4,7 +4,7 @@ Tests for YouTubeDownloader URL handling (no network access).
 
 import pytest
 
-from utils.downloader import YouTubeDownloader
+from sonopsis.downloader import YouTubeDownloader
 
 
 class TestIsPlaylist:

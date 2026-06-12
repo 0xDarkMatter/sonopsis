@@ -15,8 +15,8 @@ from colorama import init, Fore, Style
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from utils.summarizer import ContentSummarizer, claude_cli_available
-from utils.models import available_models, get_model_info
+from sonopsis.summarizer import ContentSummarizer, claude_cli_available
+from sonopsis.models import available_models, get_model_info
 
 # Initialize
 init(autoreset=True)

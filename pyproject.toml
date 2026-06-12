@@ -1,8 +1,9 @@
 [project]
 name = "sonopsis"
-version = "0.2.0"
-description = "Video/audio summariser - download, transcribe with Whisper/ElevenLabs, and generate AI summaries"
+version = "0.3.0"
+description = "Video/audio summariser - download, transcribe across six engines, and generate AI summaries"
 readme = "README.md"
+license = { text = "MIT" }
 requires-python = ">=3.11"
 dependencies = [
     "yt-dlp>=2024.0.0",
@@ -11,49 +12,54 @@ dependencies = [
     "pyyaml>=6.0.0",
     "python-dotenv>=1.0.0",
     "colorama>=0.4.6",
+    "typer>=0.12.0",
+    "rich>=13.0.0",
+    "keyring>=24.0.0",
 ]
 
-[tool.setuptools]
-# Top-level entry-point modules; prose/ prompt files resolve relative to the
-# repo so the tool is installed editable (see [tool.forma].install)
-py-modules = ["main", "sonopsis"]
-
-[tool.setuptools.packages.find]
-include = ["utils*"]
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "ruff>=0.3.0"]
+# Local transcription (torch CPU wheels; ~2GB on disk). Install: just engine whisper
+whisper = ["openai-whisper>=20231117", "torch>=2.0.0", "torchaudio>=2.0.0"]
+# Cloud transcription. Install: just engine elevenlabs
+elevenlabs = ["elevenlabs>=1.0.0"]
+# NVIDIA Parakeet local transcription via ONNX (~70MB deps + ~670MB int8 model
+# on first use; no PyTorch). Install: just engine parakeet
+parakeet = ["onnx-asr[cpu,hub]>=0.10.0"]
+# Speaker diarization for parakeet-dia and WhisperX (pyannote pulls torch;
+# requires HF_TOKEN + accepted terms on the gated pyannote models).
+diarize = ["pyannote.audio>=4.0"]
 
 [project.scripts]
-sonopsis = "main:main"
-sonopsis-tui = "sonopsis:main"
+sonopsis = "sonopsis.cli:run"
+sonopsis-tui = "sonopsis.tui:main"
 
 [build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sonopsis"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
-[project.optional-dependencies]
-dev = ["pytest>=7.0"]
-# Local transcription (torch CPU wheels; ~2GB on disk). Install: uv sync --extra whisper
-whisper = ["openai-whisper>=20231117", "torch>=2.0.0", "torchaudio>=2.0.0"]
-# Cloud transcription. Install: uv sync --extra elevenlabs
-elevenlabs = ["elevenlabs>=1.0.0"]
-# NVIDIA Parakeet local transcription via ONNX (~70MB deps + ~670MB int8 model
-# on first use; no PyTorch). Install: uv sync --extra parakeet
-parakeet = ["onnx-asr[cpu,hub]>=0.10.0"]
-# Speaker diarization for parakeet-dia and WhisperX (pyannote pulls torch;
-# requires HF_TOKEN + accepted terms on the gated pyannote models).
-# Install: uv sync --extra diarize
-diarize = ["pyannote.audio>=4.0"]
-
 [tool.forma]
-description = "Video/audio summariser - download, transcribe with Whisper/ElevenLabs, and generate AI summaries"
-resources = ["video", "audio", "transcript", "summary"]
+description = "Video/audio summariser - download, transcribe across six engines, and generate AI summaries"
+resources = ["engines", "models", "summary", "transcript", "video"]
 auth = "api_key"
+status = "experimental"
+maturity = "experimental"
 origin = "forma"
 install = "uv tool install --editable .[parakeet]"
 env-key = "OPENAI_API_KEY"
 api-url = "https://platform.openai.com/docs"
-setup-notes = "Requires OpenAI API key for Whisper transcription and GPT/Claude for summaries"
-maturity = "experimental"
-e2e_tests = 2
+setup-notes = "Summarization via Claude Code CLI (no key) or OPENAI/ANTHROPIC/OPENROUTER API keys; optional ELEVENLABS_API_KEY and HF_TOKEN for cloud transcription and diarization"
+e2e_tests = 3

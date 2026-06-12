@@ -1,10 +1,10 @@
 """
-Tests for the model registry (utils/models.py).
+Tests for the model registry (src/sonopsis/models.py).
 """
 
 from unittest.mock import patch
 
-from utils.models import (
+from sonopsis.models import (
     MODELS, PROVIDER_ENV_KEYS,
     available_models, get_max_tokens, get_model_info,
 )

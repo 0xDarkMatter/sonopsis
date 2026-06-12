@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from utils.transcriber import AudioTranscriber
+from sonopsis.transcriber import AudioTranscriber
 from scripts.benchmark_engines import wer
 
 ROOT = Path(__file__).parent.parent

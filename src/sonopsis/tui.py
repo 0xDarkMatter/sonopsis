@@ -16,11 +16,11 @@ if sys.platform == 'win32':
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
         sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
-from utils.config import default_engine, load_config
-from utils.downloader import YouTubeDownloader
-from utils.models import MODELS, available_models
-from utils.pipeline import engine_display_name, process_video
-from utils.summarizer import claude_cli_available
+from .config import default_engine, load_config
+from .downloader import YouTubeDownloader
+from .models import MODELS, available_models
+from .pipeline import engine_display_name, process_video
+from .summarizer import claude_cli_available
 
 # Arrow-key menus need msvcrt (Windows-only); everywhere else we fall back
 # to numbered input so the interactive mode still works on macOS/Linux
@@ -40,50 +40,15 @@ CONFIG = load_config()
 
 
 def print_banner():
-    """Print application banner with border - Claude Code style."""
-    width = 100
-    title = "Sonopsis v1.0"
-
-    # Top border with title
-    title_padding = width - len(title) - 5
-    border_top = f"╭─── {title} " + "─" * title_padding + "╮"
-
-    # ASCII logo lines with padding of 2 spaces
-    logo_lines = [
-        "███████╗ ██████╗ ███╗   ██╗ ██████╗ ██████╗ ███████╗██╗███████╗",
-        "██╔════╝██╔═══██╗████╗  ██║██╔═══██╗██╔══██╗██╔════╝██║██╔════╝",
-        "███████╗██║   ██║██╔██╗ ██║██║   ██║██████╔╝███████╗██║███████╗",
-        "╚════██║██║   ██║██║╚██╗██║██║   ██║██╔═══╝ ╚════██║██║╚════██║",
-        "███████║╚██████╔╝██║ ╚████║╚██████╔╝██║     ███████║██║███████║",
-        "╚══════╝ ╚═════╝ ╚═╝  ╚═══╝ ╚═════╝ ╚═╝     ╚══════╝╚═╝╚══════╝"
-    ]
-
-    # Text to display on the right of logo
-    text_lines = [
-        "",
-        "",
-        "Sonopsis v1.0",
-        "Video/Audio Summariser",
-        "",
-        ""
-    ]
-
-    print(f"\n{Fore.CYAN}{border_top}")
-    print(f"{Fore.CYAN}│{' ' * width}│")
-
-    # Print logo with text on the right side
-    for i, logo_line in enumerate(logo_lines):
-        text = text_lines[i]
-        # Logo is 68 chars, we need: 2 (left pad) + 68 (logo) + 2 (separator) + text + spaces = 100
-        spaces_needed = width - 2 - len(logo_line) - 2 - len(text)
-        print(f"{Fore.CYAN}│  {logo_line}  {text}{' ' * spaces_needed}│{Style.RESET_ALL}")
-
-    print(f"{Fore.CYAN}│{' ' * width}│")
-
-    # Bottom border
-    border_bottom = "╰" + "─" * width + "╯"
-    print(f"{Fore.CYAN}{border_bottom}{Style.RESET_ALL}\n")
-
+    """Print a quiet one-line header (terminal-design: no ASCII art logos)."""
+    from . import __version__
+    title = " Sonopsis v" + __version__ + " - Video/Audio Summariser "
+    width = max(70, len(title) + 4)
+    pad = width - len(title)
+    print()
+    print(Fore.CYAN + chr(0x256D) + chr(0x2500) + title + chr(0x2500) * pad + chr(0x256E))
+    print(Fore.CYAN + chr(0x2570) + chr(0x2500) * (width + 1) + chr(0x256F) + Style.RESET_ALL)
+    print()
 
 def print_section_header(title):
     """Print a section header."""

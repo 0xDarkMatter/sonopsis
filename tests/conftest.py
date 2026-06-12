@@ -20,8 +20,8 @@ def project_root():
 
 @pytest.fixture
 def prose_dir(project_root):
-    """Return the prose directory."""
-    return project_root / "prose"
+    """Return the prose directory (ships inside the package since 0.3.0)."""
+    return project_root / "src" / "sonopsis" / "prose"
 
 
 @pytest.fixture

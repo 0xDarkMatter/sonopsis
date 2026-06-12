@@ -1,8 +1,8 @@
 """
-Tests for the config.yaml loader (utils/config.py).
+Tests for the config.yaml loader (src/sonopsis/config.py).
 """
 
-from utils.config import DEFAULTS, load_config
+from sonopsis.config import DEFAULTS, load_config
 
 
 class TestLoadConfig:

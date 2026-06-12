@@ -51,7 +51,7 @@ class TestFullPipeline:
         # Point output dirs at tmp via a scratch config.yaml is not possible
         # through the CLI yet, so drive the pipeline directly.
         sys.path.insert(0, str(PROJECT_ROOT))
-        from utils.pipeline import process_video
+        from sonopsis.pipeline import process_video
 
         model = "claude-cli/haiku" if shutil.which("claude") else (
             "claude-haiku-4-5-20251001" if os.getenv("ANTHROPIC_API_KEY") else "gpt-4o-mini"
@@ -96,8 +96,8 @@ class TestFullPipeline:
         """Real gpt-4o-transcribe-diarize call - validates the diarized_json
         response contract the unit tests only mock."""
         sys.path.insert(0, str(PROJECT_ROOT))
-        from utils.downloader import YouTubeDownloader
-        from utils.transcriber import AudioTranscriber
+        from sonopsis.downloader import YouTubeDownloader
+        from sonopsis.transcriber import AudioTranscriber
 
         downloader = YouTubeDownloader(output_dir=str(tmp_path / "downloads"))
         video = downloader.download_video(TEST_VIDEO_URL)
@@ -117,7 +117,7 @@ class TestFullPipeline:
         # closed - proving the non-interactive path never prompts.
         script = (
             "import sys; sys.path.insert(0, r'{root}')\n"
-            "from utils.downloader import YouTubeDownloader\n"
+            "from sonopsis.downloader import YouTubeDownloader\n"
             "d = YouTubeDownloader(output_dir=r'{out}')\n"
             "r1 = d.download_video('{url}')\n"
             "assert not r1['reused_existing']\n"

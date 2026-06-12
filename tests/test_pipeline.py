@@ -1,8 +1,8 @@
 """
-Tests for the shared pipeline helpers (utils/pipeline.py). No network access.
+Tests for the shared pipeline helpers (src/sonopsis/pipeline.py). No network access.
 """
 
-from utils.pipeline import engine_display_name, find_existing_summary
+from sonopsis.pipeline import engine_display_name, find_existing_summary
 
 
 class TestEngineDisplayName:

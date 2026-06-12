@@ -15,7 +15,7 @@ from typing import Any, Dict, Optional
 from openai import OpenAI
 from datetime import datetime
 
-from utils.models import get_max_tokens
+from sonopsis.models import get_max_tokens
 
 # Transient API failures (rate limits, overload, network blips) are retried
 # with exponential backoff. The transcript feeding a summary can represent
@@ -303,7 +303,7 @@ class ContentSummarizer:
         Returns:
             System prompt string
         """
-        system_prompt_file = Path(__file__).parent.parent / "prose" / "prompts" / "system.md"
+        system_prompt_file = Path(__file__).parent / "prose" / "prompts" / "system.md"
 
         if not system_prompt_file.exists():
             raise FileNotFoundError(f"System prompt file not found: {system_prompt_file}")
@@ -387,7 +387,7 @@ class ContentSummarizer:
             Formatted prompt string
         """
         # Determine prompt file path
-        prompt_file = Path(__file__).parent.parent / "prose" / "prompts" / f"analysis_{analysis_mode}.md"
+        prompt_file = Path(__file__).parent / "prose" / "prompts" / f"analysis_{analysis_mode}.md"
 
         if not prompt_file.exists():
             raise FileNotFoundError(f"Analysis prompt file not found: {prompt_file}")
