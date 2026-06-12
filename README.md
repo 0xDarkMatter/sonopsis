@@ -113,6 +113,20 @@ HF_TOKEN=your_huggingface_token_here
 - ElevenLabs: https://elevenlabs.io (sign up and get API key from dashboard)
 - Hugging Face: https://huggingface.co/settings/tokens (for WhisperX speaker diarization)
 
+## Recent Updates
+
+**v0.2.0** (June 2026)
+
+*   🚀 **Claude Code CLI summarization** - Summarize on your Claude Pro/Max subscription with no API key: `--gpt-model claude-cli` (or `/sonnet`, `/opus`, `/haiku`). Auto-selected as the default whenever the CLI is installed.
+*   🆕 **NVIDIA Parakeet engine, new local default** - TDT 0.6B v3 via onnx-asr: no PyTorch, ~670MB, and 0% WER on clean wideband audio where Whisper scored 3-20% on the project's known-good corpus. `uv sync --extra parakeet`.
+*   🗣️ **Free local speaker diarization** - `parakeet-dia` pairs pyannote speaker turns with Parakeet transcription, beating ElevenLabs on crosstalk (9.0% vs 15.0% DER). `--num-speakers N` sharpens it further; `--auto-speakers` infers the count from video metadata, applied only at high confidence.
+*   🔌 **OpenAI gpt-4o-transcribe-diarize engine** - The best speaker counter measured: 9/9 perfect counts unhinted, including a 5-speaker panel. Reuses your existing `OPENAI_API_KEY`; oversized or rejected uploads auto re-encode to Opus.
+*   🧪 **Benchmark suite with known-good corpora** - WER and DER rubrics against exact-reference audio (31 samples across clean, noisy, narrowband, crosstalk and multi-speaker conditions). Every engine default above is backed by a committed result in `benchmarks/`, not a leaderboard claim.
+*   ⚡ **Silence-aligned chunking** - Long-audio chunk boundaries snap to detected silences instead of cutting mid-word; a forced-boundary stress test went from 43.4% WER to 0.0%.
+*   🔧 **Quality-of-life overhaul** - `config.yaml` is actually loaded now, playlists resume with `--skip-existing`, menus work beyond Windows, transient API errors retry, and the suite grew from 44 to 127 tests plus gated e2e runs against real backends.
+
+[View full changelog →](CHANGELOG.md)
+
 ## Project Structure
 
 ```
