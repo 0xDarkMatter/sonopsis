@@ -88,3 +88,33 @@ class TestParakeetChunking:
         content = md.read_text(encoding="utf-8")
         assert "NVIDIA Parakeet" in content
         assert "hello world" in content
+
+
+class TestMergeTurns:
+    """Diarization turn merging (parakeet-dia): adjacent same-speaker
+    fragments closer than merge_gap collapse into one turn."""
+
+    GAP = 0.8
+
+    def test_close_same_speaker_turns_merged(self):
+        turns = AudioTranscriber._merge_turns(
+            [(0.0, 2.0, "A"), (2.5, 4.0, "A")], self.GAP)
+        assert turns == [(0.0, 4.0, "A")]
+
+    def test_distant_same_speaker_turns_kept_separate(self):
+        turns = AudioTranscriber._merge_turns(
+            [(0.0, 2.0, "A"), (3.5, 4.0, "A")], self.GAP)
+        assert len(turns) == 2
+
+    def test_speaker_change_never_merged(self):
+        turns = AudioTranscriber._merge_turns(
+            [(0.0, 2.0, "A"), (2.1, 4.0, "B"), (4.1, 5.0, "A")], self.GAP)
+        assert [t[2] for t in turns] == ["A", "B", "A"]
+
+    def test_chain_of_fragments_collapses(self):
+        tracks = [(i * 1.0, i * 1.0 + 0.5, "A") for i in range(5)]
+        turns = AudioTranscriber._merge_turns(tracks, self.GAP)
+        assert turns == [(0.0, 4.5, "A")]
+
+    def test_empty_input(self):
+        assert AudioTranscriber._merge_turns([], self.GAP) == []

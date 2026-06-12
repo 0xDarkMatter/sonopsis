@@ -1005,12 +1005,9 @@ class AudioTranscriber:
             diarization = getattr(output, 'speaker_diarization', output)
 
             # Merge adjacent same-speaker turns separated by short gaps
-            turns = []
-            for segment, _, speaker in diarization.itertracks(yield_label=True):
-                if turns and turns[-1][2] == speaker and segment.start - turns[-1][1] < self.dia_merge_gap:
-                    turns[-1] = (turns[-1][0], segment.end, speaker)
-                else:
-                    turns.append((segment.start, segment.end, speaker))
+            tracks = [(segment.start, segment.end, speaker)
+                      for segment, _, speaker in diarization.itertracks(yield_label=True)]
+            turns = self._merge_turns(tracks, self.dia_merge_gap)
             print(f"[+] {len(turns)} speaker turns, "
                   f"{len({t[2] for t in turns})} speakers detected")
 
@@ -1069,6 +1066,24 @@ class AudioTranscriber:
                 tmp_dir.rmdir()
             except OSError:
                 pass
+
+    @staticmethod
+    def _merge_turns(tracks: list, merge_gap: float) -> list:
+        """
+        Merge adjacent same-speaker turns separated by gaps shorter than
+        merge_gap seconds.
+
+        tracks: [(start, end, speaker), ...] in chronological order.
+        Diarization emits many short fragments per speaker; merging keeps the
+        transcript readable and halves the number of audio clips transcribed.
+        """
+        turns = []
+        for start, end, speaker in tracks:
+            if turns and turns[-1][2] == speaker and start - turns[-1][1] < merge_gap:
+                turns[-1] = (turns[-1][0], end, speaker)
+            else:
+                turns.append((start, end, speaker))
+        return turns
 
     def _transcribe_parakeet(self, audio_path: Path, language: Optional[str]) -> Dict[str, Any]:
         """Transcribe using NVIDIA Parakeet TDT 0.6B v3 (local, int8 ONNX)."""
