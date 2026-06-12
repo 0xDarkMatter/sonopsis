@@ -21,12 +21,15 @@ from collections import defaultdict
 from pathlib import Path
 
 OUT_DIR = Path(__file__).parent.parent / "benchmarks" / "corpus-diarization"
-# Multiple offsets so the sample set spans several distinct speakers
-ROWS_URLS = [
-    ("https://datasets-server.huggingface.co/rows?dataset="
-     f"openslr%2Flibrispeech_asr&config=clean&split=validation&offset={off}&length=20")
-    for off in (0, 600, 1200, 1800, 2400)
-]
+
+
+def rows_urls(split: str) -> list:
+    """Multiple offsets so the sample set spans several distinct speakers."""
+    return [
+        ("https://datasets-server.huggingface.co/rows?dataset="
+         f"openslr%2Flibrispeech_asr&config=clean&split={split}&offset={off}&length=20")
+        for off in (0, 600, 1200, 1800, 2400)
+    ]
 GAP_SECONDS = 0.7
 UTTERANCES_PER_SPEAKER = 3
 
@@ -134,11 +137,10 @@ def build_overlap_conversation(name: str, speaker_clips: dict, overlap: float = 
     print(f"[+] {out_wav.name}: {len(segments)} turns with {overlap}s crosstalk overlap")
 
 
-def main():
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    print("[*] Fetching LibriSpeech sample metadata...")
+def fetch_speakers(split: str):
+    """Group sample audio URLs by speaker for a LibriSpeech split."""
     rows = []
-    for url in ROWS_URLS:
+    for url in rows_urls(split):
         with urllib.request.urlopen(url, timeout=60) as r:
             rows.extend(json.loads(r.read())["rows"])
 
@@ -149,7 +151,28 @@ def main():
         by_speaker[str(r["speaker_id"])].append(audio)
 
     speakers = [s for s, clips in by_speaker.items() if len(clips) >= UTTERANCES_PER_SPEAKER]
-    print(f"[*] Speakers with >= {UTTERANCES_PER_SPEAKER} utterances: {speakers}")
+    print(f"[*] {split} split: speakers with >= {UTTERANCES_PER_SPEAKER} utterances: {speakers}")
+    return by_speaker, speakers
+
+
+def download(by_speaker, spk_list, tag):
+    work = OUT_DIR / "_work"
+    work.mkdir(parents=True, exist_ok=True)
+    clips = {}
+    for spk in spk_list:
+        paths = []
+        for j, url in enumerate(by_speaker[spk][:UTTERANCES_PER_SPEAKER]):
+            p = work / f"raw_{tag}_{spk}_{j}.wav"
+            urllib.request.urlretrieve(url, p)
+            paths.append(p)
+        clips[f"spk_{spk}"] = paths
+    return clips
+
+
+def main():
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    print("[*] Fetching LibriSpeech sample metadata...")
+    by_speaker, speakers = fetch_speakers("validation")
     if len(speakers) < 2:
         print("[!] Need at least 2 distinct speakers in the sample set")
         sys.exit(1)
@@ -157,28 +180,26 @@ def main():
     work = OUT_DIR / "_work"
     work.mkdir(parents=True, exist_ok=True)
 
-    def download(spk_list, tag):
-        clips = {}
-        for spk in spk_list:
-            paths = []
-            for j, url in enumerate(by_speaker[spk][:UTTERANCES_PER_SPEAKER]):
-                p = work / f"raw_{tag}_{spk}_{j}.wav"
-                urllib.request.urlretrieve(url, p)
-                paths.append(p)
-            clips[f"spk_{spk}"] = paths
-        return clips
-
-    clips2 = download(speakers[:2], "2spk")
+    clips2 = download(by_speaker, speakers[:2], "2spk")
     build_conversation("conv_2spk", clips2)
     build_overlap_conversation("conv_2spk_overlap", clips2)
 
     if len(speakers) >= 3:
-        clips3 = download(speakers[:3], "3spk")
+        clips3 = download(by_speaker, speakers[:3], "3spk")
         build_conversation("conv_3spk", clips3)
 
     if len(speakers) >= 4:
-        clips4 = download(speakers[:4], "4spk")
+        clips4 = download(by_speaker, speakers[:4], "4spk")
         build_conversation("conv_4spk", clips4)
+
+    # Held-out set from the TEST split: entirely different speakers, so
+    # selection rules tuned on the primary set can be validated without
+    # overfitting. Includes a 5-speaker case the primary set lacks.
+    by_speaker_t, speakers_t = fetch_speakers("test")
+    for n in (2, 3, 4, 5):
+        if len(speakers_t) >= n:
+            clips = download(by_speaker_t, speakers_t[:n], f"{n}spk_b")
+            build_conversation(f"conv_{n}spk_b", clips)
 
     # Noisy variant of the 3-speaker conversation: pink noise changes the
     # audio but not who-speaks-when, so the reference RTTM stays exact

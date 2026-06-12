@@ -31,10 +31,19 @@ from pyannote.audio import Pipeline
 from pyannote.audio.pipelines.speaker_verification import PretrainedSpeakerEmbedding
 
 CORPUS = ROOT / "benchmarks" / "corpus-diarization"
-TRUTH = {"conv_2spk": 2, "conv_2spk_overlap": 2, "conv_3spk": 3,
-         "conv_3spk_noisy": 3, "conv_4spk": 4}
-K_RANGE = range(2, 6)
+K_RANGE = range(2, 7)
 MIN_TURN = 0.6  # embeddings on sub-0.6s snippets are unstable
+# epsilon rule (HYPOTHESIS, tuned on the primary set): pick the largest k
+# whose silhouette is within EPS of the max - rationale: silhouette degrades
+# slowly when a true speaker is split off, sharply when distinct speakers
+# are merged
+EPS = 0.06
+
+
+def true_speaker_count(rttm: Path) -> int:
+    spks = {line.split()[7] for line in rttm.read_text(encoding="utf-8").splitlines()
+            if line.startswith("SPEAKER")}
+    return len(spks)
 
 
 def load_waveform(path: Path):
@@ -91,11 +100,13 @@ def main():
         "pyannote/wespeaker-voxceleb-resnet34-LM", device=torch.device("cpu"),
         token=token)
 
+    pattern = sys.argv[1] if len(sys.argv) > 1 else "conv_*.wav"
     rows = []
-    for wav in sorted(CORPUS.glob("conv_*.wav")):
-        true_k = TRUTH.get(wav.stem)
-        if true_k is None:
+    for wav in sorted(CORPUS.glob(pattern)):
+        rttm = wav.with_suffix(".rttm")
+        if not rttm.exists():
             continue
+        true_k = true_speaker_count(rttm)
         waveform, sr = load_waveform(wav)
         start_t = time.time()
 
@@ -111,30 +122,37 @@ def main():
             sil = cosine_silhouette(X, labels) if distinct > 1 else -1.0
             sweep[k] = sil
         probe_k = max(sweep, key=sweep.get)
+        best = max(sweep.values())
+        eps_k = max(k for k, v in sweep.items() if v >= best - EPS)
         elapsed = time.time() - start_t
 
         rows.append({"file": wav.stem, "true": true_k, "unhinted": unhinted,
-                     "probe": probe_k, "sweep": sweep, "seconds": elapsed})
+                     "probe": probe_k, "eps": eps_k, "sweep": sweep, "seconds": elapsed})
         sweep_str = " ".join(f"k{k}={v:.3f}" for k, v in sweep.items())
-        print(f"[{wav.stem}] true={true_k} unhinted={unhinted} probe={probe_k} "
-              f"({sweep_str}) {elapsed:.0f}s")
+        print(f"[{wav.stem}] true={true_k} unhinted={unhinted} argmax={probe_k} "
+              f"eps={eps_k} ({sweep_str}) {elapsed:.0f}s")
 
     probe_right = sum(r["probe"] == r["true"] for r in rows)
+    eps_right = sum(r["eps"] == r["true"] for r in rows)
     unhinted_right = sum(r["unhinted"] == r["true"] for r in rows)
 
     lines = ["# Acoustic Speaker-Count Probe Experiment", "",
-             "Sweep k=2..5, score cosine silhouette of turn embeddings, pick best k.", "",
-             "| File | True | Unhinted pyannote | Probe pick | Silhouettes (k2..k5) |",
-             "|---|---|---|---|---|"]
+             f"Sweep k={K_RANGE.start}..{K_RANGE.stop - 1}, cosine silhouette of turn embeddings.",
+             f"argmax = naive best; eps = largest k within {EPS} of best (hypothesis).", "",
+             "| File | True | Unhinted | argmax | eps-rule | Silhouettes |",
+             "|---|---|---|---|---|---|"]
     for r in rows:
         sw = ", ".join(f"{v:.3f}" for v in r["sweep"].values())
         lines.append(f"| {r['file']} | {r['true']} | {r['unhinted']} | "
-                     f"**{r['probe']}** | {sw} |")
+                     f"{r['probe']} | **{r['eps']}** | {sw} |")
     lines += ["", f"- Unhinted correct: {unhinted_right}/{len(rows)}",
-              f"- Probe correct: {probe_right}/{len(rows)}",
-              f"- Probe cost: ~4 extra diarization passes per video"]
+              f"- argmax correct: {probe_right}/{len(rows)}",
+              f"- eps-rule correct: {eps_right}/{len(rows)}",
+              f"- Probe cost: ~{len(K_RANGE)} extra diarization passes per video"]
     report = "\n".join(lines) + "\n"
-    (ROOT / "benchmarks" / "exp-speaker-probe.md").write_text(report, encoding="utf-8")
+    out = ROOT / "benchmarks" / ("exp-speaker-probe-heldout.md" if pattern != "conv_*.wav"
+                                 else "exp-speaker-probe.md")
+    out.write_text(report, encoding="utf-8")
     print(f"\n{report}")
 
 
