@@ -208,6 +208,38 @@ class TestTranscribeCommand:
         result = runner.invoke(app, ["transcribe", "https://youtu.be/x", "--engine", "bogus"])
         assert result.exit_code == 4
 
+    def _transcribe_url(self, tmp_path, args_extra=(), reused=False):
+        audio = tmp_path / "YT_dQw4w9WgXcQ_T.mp3"
+        audio.write_bytes(b"fake")
+        video = {"audio_file": str(audio), "title": "T", "reused_existing": reused}
+        fake = {"text": "x", "language": "en", "text_file": "t.md"}
+        with patch("sonopsis.downloader.YouTubeDownloader.download_video",
+                   return_value=video), \
+             patch("sonopsis.transcriber.AudioTranscriber.__init__", return_value=None), \
+             patch("sonopsis.transcriber.AudioTranscriber.transcribe", return_value=fake):
+            result = runner.invoke(
+                app, ["transcribe", "https://youtu.be/dQw4w9WgXcQ", *args_extra])
+        return result, audio
+
+    def test_downloaded_audio_deleted_by_default(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        result, audio = self._transcribe_url(tmp_path)
+        assert result.exit_code == 0
+        assert not audio.exists()
+
+    def test_keep_files_preserves_downloaded_audio(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        result, audio = self._transcribe_url(tmp_path, args_extra=("--keep-files",))
+        assert result.exit_code == 0
+        assert audio.exists()
+
+    def test_reused_download_never_deleted(self, tmp_path, monkeypatch):
+        """Cached audio reused from a previous run is not this run's to delete."""
+        monkeypatch.chdir(tmp_path)
+        result, audio = self._transcribe_url(tmp_path, reused=True)
+        assert result.exit_code == 0
+        assert audio.exists()
+
     def test_engine_failure_maps_to_error_exit(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         audio = tmp_path / "a.mp3"
