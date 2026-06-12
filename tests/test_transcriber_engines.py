@@ -146,3 +146,43 @@ class TestOpenAIEngine:
         t = self._transcriber(tmp_path)
         audio = self._audio(tmp_path)
         assert t._prepare_for_openai(audio) == audio
+
+    def test_corrupted_format_retried_with_opus(self, tmp_path):
+        """OpenAI rejecting the container must trigger ONE Opus re-encode
+        retry, and the temp .ogg must be cleaned up afterwards."""
+        t = self._transcriber(tmp_path)
+        audio = self._audio(tmp_path)
+        ogg = audio.with_suffix(".openai.ogg")
+
+        response = MagicMock()
+        response.model_dump.return_value = {"text": "recovered", "segments": []}
+        client = MagicMock()
+        client.audio.transcriptions.create.side_effect = [
+            Exception("The audio file might be corrupted or unsupported"),
+            response,
+        ]
+
+        def fake_reencode(self, path):
+            ogg.write_bytes(b"opus")
+            return ogg
+
+        with patch("openai.OpenAI", return_value=client), \
+             patch.object(AudioTranscriber, "_reencode_opus", fake_reencode):
+            result = t._transcribe_openai(audio, language=None)
+
+        assert result["text"] == "recovered"
+        assert client.audio.transcriptions.create.call_count == 2
+        assert not ogg.exists()  # temp re-encode cleaned up
+
+    def test_other_api_errors_not_retried(self, tmp_path):
+        t = self._transcriber(tmp_path)
+        audio = self._audio(tmp_path)
+        client = MagicMock()
+        client.audio.transcriptions.create.side_effect = Exception("rate limit")
+
+        with patch("openai.OpenAI", return_value=client), \
+             patch.object(AudioTranscriber, "_reencode_opus") as reencode:
+            with pytest.raises(Exception, match="rate limit"):
+                t._transcribe_openai(audio, language=None)
+        reencode.assert_not_called()
+        assert client.audio.transcriptions.create.call_count == 1
