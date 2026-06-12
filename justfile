@@ -21,15 +21,15 @@ engines-all:
 
 # Summarise a video or playlist (flags pass through, e.g. just summarise URL --engine openai)
 summarise +args:
-    uv run python main.py {{args}}
+    uv run sonopsis summarise {{args}}
 
-# Alias for summarise
+# Pass anything through to the CLI (e.g. just run transcribe file.mp3 --json)
 run +args:
-    uv run python main.py {{args}}
+    uv run sonopsis {{args}}
 
 # Launch the interactive menu interface
 tui:
-    uv run python sonopsis.py
+    uv run sonopsis tui
 
 # Run the unit test suite (fast, no network)
 test:

@@ -9,11 +9,18 @@
 
 # Sonopsis
 
+[![Release](https://img.shields.io/github/v/release/0xDarkMatter/sonopsis?color=blueviolet)](https://github.com/0xDarkMatter/sonopsis/releases)
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-137%20passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-306%20passing-brightgreen.svg)](tests/)
 
 > Video/audio summariser - download YouTube videos, transcribe across six engines (local and cloud), and generate AI summaries using Claude/GPT models or your Claude subscription, no API key needed.
+
+Sonopsis turns YouTube videos, playlists, and local audio into clean transcripts and dense, well-structured markdown summaries. One command downloads the audio, transcribes it through your choice of six engines - from a free local NVIDIA Parakeet model that needs no PyTorch, to cloud engines with word-level speaker diarization - and summarises it with Claude or GPT. If you have Claude Code installed, summarization runs on your existing Claude subscription: no API key, no per-token cost.
+
+It exists because most transcription tooling makes you choose between accuracy, cost, and convenience without ever showing its working. Sonopsis ships its homework: engine defaults are backed by committed WER/DER benchmarks against known-good corpora, so "Parakeet is the default" means it scored 0% word error rate where Whisper scored 3-20%, not that it's fashionable.
+
+It's built for two audiences at once: humans get readable commands (`sonopsis summarise <URL>`) and guided menus (`sonopsis tui`); scripts and AI agents get `--json` envelopes, semantic exit codes, and a stdout that carries nothing but data.
 
 ## Quick Start
 
@@ -41,12 +48,15 @@ Your transcript lands in `transcripts/`, the summary in `summaries/`. Prefer gui
 
 **v0.3.0** (June 2026)
 
-*   🚀 **Agent-first CLI rewrite** - A typer command architecture replaces the argparse app: `sonopsis summarise|transcribe|engines|models|auth|config|tui`, with `--json` `{data, meta}` envelopes, semantic exit codes, and a strict stdout-is-data / stderr-is-progress split. Every pre-0.3.0 invocation still works via shims.
+*   🚀 **Agent-first CLI rewrite** - A typer command architecture replaces the argparse app: `sonopsis summarise|transcribe|engines|models|auth|config|tui`, with `--json` `{data, meta}` envelopes, semantic exit codes, and a strict stdout-is-data / stderr-is-progress split.
+*   ✨ **Commands that read like sentences** - `sonopsis summarise <URL>` (or `summarize`) instead of flag soup, and engine shortcut flags that say what you mean: `sonopsis --parakeet <URL>`, `sonopsis summarise --openai <URL>`. Every pre-0.3.0 invocation - bare URLs, old flag spellings - still works via shims.
 *   🆕 **`sonopsis transcribe`** - Transcription without summarization, for YouTube URLs *and local audio files*.
 *   🔧 **`sonopsis engines install <pack>`** - Self-managing engine packs retire raw `uv sync --extra` from the user surface; `engines list` shows what's installed and what each engine still needs.
 *   🛡️ **Keyring auth** - `sonopsis auth login <provider>` stores keys in the OS keyring (resolution: env > .env > keyring); `auth status` shows every backend at a glance.
+*   🖥️ **Quieter interactive mode** - the guided menus live at `sonopsis tui`, with a one-line header replacing the ASCII banner so the screen belongs to your content.
 *   📦 **Proper packaging** - `src/sonopsis/` layout with hatchling; prompt templates ship inside the package, so non-editable installs finally work.
 *   🤖 **Agent skill** - `skills/sonopsis/` documents the command surface and benchmark-backed engine selection for AI-assistant orchestration.
+*   🧪 **306 tests, up from 137** - an edge-case hardening pass across every engine and CLI path fixed six bugs along the way, including summaries that could lean on video metadata instead of the full transcript, `--json` errors leaking to stderr, and unknown engine names silently loading Whisper.
 
 **v0.2.0** (June 2026)
 
@@ -308,10 +318,13 @@ sonopsis <URL> --keep-files
 ### Command Line Options
 
 - `url` (required): YouTube video or playlist URL
-- `--engine` (alias `--transcription-engine`): Transcription engine to use (default: `whisper`)
-  - `whisper`: Local transcription, free, no speaker labels
+- `--engine` (alias `--transcription-engine`): Transcription engine to use (default: `parakeet` when installed, else `whisper`)
+  - `parakeet`: Local, free, best benchmark accuracy, no speaker labels
+  - `parakeet-dia`: Local with speaker diarization, free (requires HF_TOKEN)
+  - `whisper`: Local, free, most robust on degraded audio
   - `whisperx`: Local with speaker diarization, free (requires HF_TOKEN)
-  - `elevenlabs`: Cloud transcription, paid, 99 languages, speaker diarization + audio events
+  - `elevenlabs`: Cloud, paid, 99 languages, speaker diarization + audio events
+  - `openai`: Cloud, paid, best speaker counting (gpt-4o-transcribe-diarize)
 - `--whisper-model`: Whisper model size - `tiny`, `base`, `small`, `medium`, `large` (default: `base`)
   - Only applies to `whisper` and `whisperx` engines
 - `--model` (alias `--gpt-model`): AI model for summaries (default: `claude-cli` when the Claude Code CLI is installed, else `claude-sonnet-4-6`)
@@ -443,13 +456,15 @@ Detailed content...
 
 | Module | Purpose |
 |---|---|
-| `utils/pipeline.py` | Shared download → transcribe → summarize flow used by both front-ends (`process_video()`) |
-| `utils/downloader.py` | YouTube download via yt-dlp (`download_video()`, `get_playlist_videos()`, cached-audio reuse) |
-| `utils/transcriber.py` | All six transcription engines behind one `AudioTranscriber(engine=...).transcribe()` interface |
-| `utils/summarizer.py` | Summarization across OpenAI / Anthropic / OpenRouter APIs and the Claude Code CLI, with retry |
-| `utils/models.py` | Single registry of summarization models (IDs, costs, output limits) feeding menus and CLI |
-| `utils/speakers.py` | Gated LLM speaker-count inference from video metadata (`--auto-speakers`) |
-| `utils/config.py` | `config.yaml` loader and engine auto-default logic |
+| `sonopsis/cli.py` | Typer CLI: `summarise`/`transcribe` plus `engines`/`models`/`auth`/`config` subcommands |
+| `sonopsis/pipeline.py` | Shared download → transcribe → summarize flow used by both front-ends (`process_video()`) |
+| `sonopsis/downloader.py` | YouTube download via yt-dlp (`download_video()`, `get_playlist_videos()`, cached-audio reuse) |
+| `sonopsis/transcriber.py` | All six transcription engines behind one `AudioTranscriber(engine=...).transcribe()` interface |
+| `sonopsis/summarizer.py` | Summarization across OpenAI / Anthropic / OpenRouter APIs and the Claude Code CLI, with retry |
+| `sonopsis/models.py` | Single registry of summarization models (IDs, costs, output limits) feeding menus and CLI |
+| `sonopsis/speakers.py` | Gated LLM speaker-count inference from video metadata (`--auto-speakers`) |
+| `sonopsis/credentials.py` | Keyring credential store behind `sonopsis auth` (env > .env > keyring) |
+| `sonopsis/config.py` | `config.yaml` loader and engine auto-default logic |
 
 ## Benchmarks
 
@@ -485,8 +500,8 @@ parakeet-dia beat ElevenLabs on crosstalk (9.0% vs 15.0% DER).
 - `gpt-4o`: ~$0.15-0.30
 - `gpt-5.1`: ~$0.20-0.40 (latest reasoning model)
 - `claude-haiku-4-5`: ~$0.03-0.10 (fastest, cheapest)
-- `claude-sonnet-4-6`: ~`claude-sonnet-4-5`: ~$0.10-0.30 (best overall quality).10-0.30 (best overall quality)
-- `claude-cli`: `claude-sonnet-4-5`: ~$0.10-0.30 (best overall quality) extra (uses your Claude subscription)
+- `claude-sonnet-4-6`: ~$0.10-0.30 (best overall quality)
+- `claude-cli`: $0 extra (uses your Claude subscription)
 - `kimi-k2` (OpenRouter): ~$0.15-0.40 (200K+ context)
 - `glm-4.6-plus` (OpenRouter): ~$0.10-0.25 (excellent multilingual)
 
@@ -553,20 +568,20 @@ Use a smaller model: `--whisper-model tiny` or `--whisper-model base`
 ### Using as a Library
 
 ```python
-from utils.downloader import YouTubeDownloader
-from utils.transcriber import AudioTranscriber
-from utils.summarizer import ContentSummarizer
+from sonopsis.downloader import YouTubeDownloader
+from sonopsis.transcriber import AudioTranscriber
+from sonopsis.summarizer import ContentSummarizer
 
 # Download video
 downloader = YouTubeDownloader()
 video_data = downloader.download_video("https://youtube.com/watch?v=...")
 
-# Transcribe
-transcriber = AudioTranscriber(model_name="base")
+# Transcribe (engine="parakeet" / "whisper" / "elevenlabs" / ...)
+transcriber = AudioTranscriber(engine="parakeet")
 transcript = transcriber.transcribe(video_data['audio_file'])
 
 # Summarize
-summarizer = ContentSummarizer(model="gpt-4o-mini")
+summarizer = ContentSummarizer(model="claude-cli")
 summary = summarizer.summarize(transcript['text'], video_data)
 ```
 

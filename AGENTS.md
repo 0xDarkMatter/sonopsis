@@ -136,7 +136,7 @@ These directories contain user output, not code. Don't commit contents.
 ## Testing
 
 ```bash
-uv run --extra dev pytest tests -q              # unit suite (~134 tests, fast, no network)
+uv run --extra dev pytest tests -q              # unit suite (306 tests, fast, no network)
 RUN_E2E=1 uv run --extra dev --extra whisper pytest tests/e2e -v   # real pipeline + live APIs
 python scripts/benchmark_engines.py             # WER vs known-good corpus
 python scripts/benchmark_diarization.py         # DER vs exact RTTMs

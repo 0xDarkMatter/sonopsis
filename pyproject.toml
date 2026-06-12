@@ -4,6 +4,10 @@ version = "0.3.0"
 description = "Video/audio summariser - download, transcribe across six engines, and generate AI summaries"
 readme = "README.md"
 license = { text = "MIT" }
+keywords = [
+    "youtube", "transcription", "summarization", "whisper", "parakeet",
+    "speech-to-text", "diarization", "claude", "yt-dlp", "cli",
+]
 requires-python = ">=3.11"
 dependencies = [
     "yt-dlp>=2024.0.0",
@@ -29,6 +33,11 @@ parakeet = ["onnx-asr[cpu,hub]>=0.10.0"]
 # Speaker diarization for parakeet-dia and WhisperX (pyannote pulls torch;
 # requires HF_TOKEN + accepted terms on the gated pyannote models).
 diarize = ["pyannote.audio>=4.0"]
+
+[project.urls]
+Repository = "https://github.com/0xDarkMatter/sonopsis"
+Changelog = "https://github.com/0xDarkMatter/sonopsis/blob/main/CHANGELOG.md"
+Issues = "https://github.com/0xDarkMatter/sonopsis/issues"
 
 [project.scripts]
 sonopsis = "sonopsis.cli:run"

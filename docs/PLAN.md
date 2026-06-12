@@ -1,25 +1,21 @@
 # Sonopsis Development Plan
 
-## v0.3.0 - Forma Protocol rewrite (next)
-
-Goal: rebuild the CLI surface to the [Forma Protocol](https://github.com/forma-tools/forma)
-while keeping the v0.2.0 engine/benchmark internals (`utils/`) untouched.
-
-- [x] Verb-first syntax: `sonopsis summarise <URL>` (British primary, `summarize` alias) - shipped early as a shim
-- [x] Engine shortcut flags: `sonopsis --parakeet <URL>` == `--engine parakeet` - shipped early
-- [ ] Typer command architecture: `sonopsis summarise|transcribe|engines|auth|config` (formalises the shim verbs)
-- [ ] **sonopsis SKILL** for agent orchestration, following claude-mods SKILL-RESOURCE-PROTOCOL
-      (SKILL.md + scripts/references/assets, written against the v0.3.0 command surface)
-- [ ] `sonopsis engines install <pack>` - self-managing engine packs (replaces raw `uv sync --extra`)
-- [ ] `--json` on every command; stdout = data, stderr = chrome (`Console(stderr=True)`)
-- [ ] Exit-code contract, `_error`/`_output_json` helpers, `auth login|status|logout` + keyring credentials
-- [ ] `src/sonopsis/` package layout, hatchling build, `status` field in `[tool.forma]`
-- [ ] README protocol sections (badges, Key Commands, Resources, Authentication, Links, Forma Protocol footer)
-- [ ] AGENTS.md Agent Rules (auth status check, --json usage, prompt-injection warning)
-- [ ] Menu/output redesign informed by the terminal panel design language (drop ASCII banner,
-      replace hand-rolled box padding; principles from claude-mods TERMINAL-DESIGN)
-
 ## Recent Changes
+
+### v0.3.0 - Agent-first CLI rewrite (2026-06)
+- [x] Typer command architecture: `sonopsis summarise|transcribe|engines|models|auth|config|tui`
+- [x] Verb-first syntax (`summarise`/`summarize`) + engine shortcut flags (`--parakeet`),
+      with full back-compat shims for pre-0.3.0 invocations
+- [x] `--json` `{data, meta}` envelopes on every command; stdout = data, stderr = chrome
+- [x] Exit-code contract (0/1/2/3/4) + `_error`/`_output_json` helpers
+- [x] Keyring credentials: `auth login|status|logout`, resolution env > .env > keyring
+- [x] `sonopsis engines install <pack>` - self-managing engine packs
+- [x] `src/sonopsis/` package layout, hatchling build; prompt templates ship in the package
+- [x] **sonopsis SKILL** for agent orchestration (`skills/sonopsis/`)
+- [x] README restructure + AGENTS.md Agent Rules (auth check, --json, prompt-injection warning)
+- [x] Quiet one-line TUI header replaces the ASCII banner
+- [x] Hardening pass: 306 unit tests (from 137) + 4 gated e2e; six bugs fixed, incl.
+      summary prompts not embedding the transcript
 
 ### v0.2.0 - Engines and evidence (2026-06)
 - [x] Claude Code CLI summarization backend (subscription, no API key)

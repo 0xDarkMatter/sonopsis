@@ -41,6 +41,30 @@ invocation keeps working through compatibility shims.
   flags and the old `--transcription-engine`/`--gpt-model` spellings are
   rewritten on the way in.
 
+### Fixed
+
+- Summary prompts now embed the full transcript directly; previously a
+  missing template placeholder meant summaries leaned on video metadata
+  rather than the transcript text. Guarded by a template lint and a live
+  e2e canary test.
+- `transcribe --json` error envelopes were diverted to stderr by the stdout
+  redirect; errors now land on stdout where agents expect them.
+- An unknown `--engine` value silently fell back to Whisper instead of
+  failing fast with a validation error.
+- The `--auto-speakers` confidence gate was case-sensitive: an LLM answering
+  `"High"` silently disabled the feature.
+- Speaker inference could accept a boolean as a speaker count (`bool`
+  subclasses `int` in Python), turning `true` into "1 speaker".
+- claude-cli summaries were attributed to "OpenAI claude-cli" in the summary
+  header; they now read "Claude Code CLI (subscription)".
+
+### Testing
+
+- The suite grew from 137 to 306 unit tests plus 4 gated e2e tests via an
+  autonomous test/fix pass over every engine path, the full CLI surface,
+  pipeline orchestration, credentials, and prompt assembly. All six fixes
+  above were found by that pass and each carries a regression test.
+
 ### Removed
 
 - Top-level `main.py`/`sonopsis.py` entry scripts and the `utils/` package
