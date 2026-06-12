@@ -20,14 +20,14 @@ Three steps to your first summary. You need [Python 3.11+](https://www.python.or
 ```bash
 # 1. Get the code and dependencies (incl. the recommended local transcription engine)
 git clone https://github.com/0xDarkMatter/sonopsis && cd sonopsis
-uv sync --extra parakeet
+just setup        # or without just:  uv sync --extra parakeet
 
 # 2. Pick ONE summarization backend:
 #    - Already use Claude Code (Pro/Max)? Skip this step - it's detected automatically.
 #    - Otherwise: cp .env.example .env  and add OPENAI_API_KEY or ANTHROPIC_API_KEY
 
 # 3. Summarize a video
-uv run python main.py "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+just run "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 ```
 
 Your transcript lands in `transcripts/`, the summary in `summaries/`. Prefer guided menus over flags? Run `uv run python sonopsis.py` instead. Everything else - speaker diarization, engine choices, playlists, custom prompts - is below.
@@ -134,28 +134,29 @@ Everything past the Quick Start: engine packs, API keys, and per-project default
 1. **Clone or download this repository**
 
 2. **Install Python dependencies:**
+The friendly way (with [just](https://github.com/casey/just)):
+
 ```bash
-# Core install (summarization + ElevenLabs/OpenAI cloud engines, no local models)
-uv sync
-
-# Engine packs - install only what you need:
-uv sync --extra parakeet    # NVIDIA Parakeet, recommended local engine (~70MB deps, no PyTorch)
-uv sync --extra whisper     # Whisper/WhisperX (downloads PyTorch CPU wheels, ~2GB)
-uv sync --extra diarize     # pyannote speaker diarization for parakeet-dia/WhisperX
-uv sync --extra elevenlabs  # ElevenLabs cloud SDK
-
-# Extras combine freely:
-uv sync --extra parakeet --extra diarize
-
-# Legacy pip fallback
-pip install -r requirements.txt
+just setup                # core deps + Parakeet engine + dev tools
+just engine whisper       # add an engine pack: parakeet | whisper | diarize | elevenlabs
+just engines-all          # everything (whisper pulls ~2GB PyTorch)
+just                      # list all commands (run, tui, test, e2e, bench...)
 ```
 
-> **Why "--extra"?** These are standard Python [optional dependencies](https://packaging.python.org/en/latest/specifications/dependency-groups/)
-> (the packaging ecosystem calls them "extras" - the same mechanism as
-> `pip install "sonopsis[parakeet]"`). uv spells it `--extra <name>`. Sonopsis
-> uses them so the core install stays ~50MB: heavy engine stacks like PyTorch
-> are opt-in rather than forced on everyone.
+The direct way (uv "engine packs" are standard Python [optional dependencies](https://packaging.python.org/en/latest/specifications/dependency-groups/),
+aka "extras" - the same mechanism as `pip install "sonopsis[parakeet]"`; the
+awkward `--extra` spelling is uv's, which is why the justfile exists):
+
+```bash
+uv sync                              # core only (~50MB: cloud engines + summarization)
+uv sync --extra parakeet             # + NVIDIA Parakeet (~70MB deps, no PyTorch)
+uv sync --extra whisper              # + Whisper/WhisperX (PyTorch CPU wheels, ~2GB)
+uv sync --extra diarize              # + pyannote diarization (parakeet-dia/WhisperX)
+uv sync --extra elevenlabs           # + ElevenLabs SDK
+uv sync --extra parakeet --extra diarize   # extras combine freely
+
+pip install -r requirements.txt      # legacy pip fallback
+```
 
 > **No API key?** If the [Claude Code CLI](https://claude.com/claude-code) is installed,
 > Sonopsis automatically uses it for summarization on your Claude Pro/Max subscription -
