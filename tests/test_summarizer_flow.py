@@ -168,6 +168,42 @@ class TestFormatOutputHeader:
         assert out.index("Processing Information") < out.index("THE BODY")
 
 
+class TestIdentifySpeakers:
+    def _summarizer(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "k")
+        return ContentSummarizer(model="gpt-4o-mini", output_dir=str(tmp_path))
+
+    def test_no_speaker_labels_returns_empty(self, tmp_path, monkeypatch):
+        s = self._summarizer(tmp_path, monkeypatch)
+        assert s._identify_speakers("plain transcript, no labels", {}) == ""
+
+    def test_speakers_counted_and_listed(self, tmp_path, monkeypatch):
+        s = self._summarizer(tmp_path, monkeypatch)
+        transcript = ("**[SPEAKER_0]** `[00:00:01]` Hi\n"
+                      "**[SPEAKER_1]** `[00:00:05]` Hello\n"
+                      "**[SPEAKER_0]** `[00:00:09]` How are you\n")
+        guidance = s._identify_speakers(transcript, {"title": "Chat",
+                                                     "uploader": "Show"})
+        assert "2 speakers" in guidance
+        assert "SPEAKER_0" in guidance and "SPEAKER_1" in guidance
+        assert "**Video Title:** Chat" in guidance
+
+    def test_names_extracted_from_description(self, tmp_path, monkeypatch):
+        s = self._summarizer(tmp_path, monkeypatch)
+        transcript = "**[SPEAKER_0]** hi"
+        meta = {"description": "An interview with Jane Doe and John Smith."}
+        guidance = s._identify_speakers(transcript, meta)
+        assert "Jane Doe" in guidance and "John Smith" in guidance
+
+    def test_only_first_3000_chars_scanned(self, tmp_path, monkeypatch):
+        """A speaker appearing only deep into the transcript is outside the
+        analysis window - by design, not by accident."""
+        s = self._summarizer(tmp_path, monkeypatch)
+        transcript = "**[SPEAKER_0]** hi " + "x" * 3000 + " **[SPEAKER_1]** late"
+        guidance = s._identify_speakers(transcript, {})
+        assert "1 speakers" in guidance
+
+
 class TestCreateSummaryPrompt:
     URL = "https://youtu.be/dQw4w9WgXcQ"
 
