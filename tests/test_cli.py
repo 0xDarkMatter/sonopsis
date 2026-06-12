@@ -132,6 +132,50 @@ class TestSubapps:
         assert "paths" in envelope["data"]
 
 
+class TestHumanOutputContract:
+    """Non-JSON mode: rich UI goes to stderr, stdout stays a clean data
+    channel (only artifact paths are ever printed there)."""
+
+    @pytest.mark.parametrize("args", [
+        ["engines", "list"],
+        ["models", "list", "--all"],
+        ["auth", "status"],
+        ["config", "show"],
+    ])
+    def test_informational_commands_keep_stdout_clean(self, args):
+        result = runner.invoke(app, args)
+        assert result.exit_code == 0
+        assert result.stdout == ""  # tables/panels render on stderr only
+
+    def test_summarise_prints_only_artifact_path(self):
+        process_result = {"success": True, "url": "u", "title": "T",
+                          "transcript_file": "t.md", "summary_file": "s.md"}
+        with patch("sonopsis.cli._startup"), \
+             patch("sonopsis.cli._require_summarization_backend"), \
+             patch("sonopsis.pipeline.process_video", return_value=process_result), \
+             patch("sonopsis.downloader.YouTubeDownloader.is_playlist", return_value=False):
+            result = runner.invoke(app, ["summarise", "https://youtu.be/dQw4w9WgXcQ"])
+        assert result.stdout.strip() == "s.md"
+
+
+class TestEngineStatus:
+    def test_exactly_one_default_engine(self):
+        from sonopsis.cli import _engine_status
+        rows = _engine_status()
+        assert sum(1 for r in rows if r["default"]) == 1
+
+    def test_openai_always_installed_needs_key_without_env(self, monkeypatch):
+        from sonopsis.cli import _engine_status
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        row = next(r for r in _engine_status() if r["engine"] == "openai")
+        assert row["installed"] is True  # SDK ships with the base install
+        assert row["needs"] == "OPENAI_API_KEY"
+
+    def test_all_engines_covered(self):
+        from sonopsis.cli import _engine_status
+        assert {r["engine"] for r in _engine_status()} == set(ENGINES)
+
+
 class TestTranscribeCommand:
     def test_local_file_not_found_exit_code(self, tmp_path):
         result = runner.invoke(app, ["transcribe", str(tmp_path / "missing.mp3")])
