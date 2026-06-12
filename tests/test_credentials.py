@@ -7,7 +7,9 @@ import pytest
 from unittest.mock import patch
 
 from sonopsis import credentials
-from sonopsis.credentials import PROVIDERS, CredentialStore, auth_overview, export_to_env
+from sonopsis.credentials import (
+    PROVIDERS, CredentialStore, auth_overview, export_to_env, get_credential,
+)
 
 
 class TestProviderValidation:
@@ -87,6 +89,31 @@ class TestExportToEnv:
         monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
 
 
+class TestDelete:
+    def test_delete_removes_existing_credential(self):
+        with patch.object(credentials, "keyring") as kr:
+            kr.get_password.return_value = "stored"
+            assert CredentialStore("openai").delete() is True
+            kr.delete_password.assert_called_once_with("sonopsis", "openai")
+
+    def test_delete_nothing_stored_returns_false(self):
+        with patch.object(credentials, "keyring") as kr:
+            kr.get_password.return_value = None
+            assert CredentialStore("openai").delete() is False
+            kr.delete_password.assert_not_called()
+
+    def test_delete_swallows_keyring_errors(self):
+        with patch.object(credentials, "keyring") as kr:
+            kr.get_password.side_effect = RuntimeError("locked")
+            assert CredentialStore("openai").delete() is False
+
+
+class TestConvenience:
+    def test_get_credential_matches_store(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "abc")
+        assert get_credential("openai") == "abc"
+
+
 class TestAuthOverview:
     def test_overview_covers_all_providers_plus_cli(self):
         overview = auth_overview()
@@ -94,3 +121,15 @@ class TestAuthOverview:
         assert "claude-cli" in overview
         for row in overview.values():
             assert "configured" in row and "unlocks" in row
+
+    def test_claude_cli_detected_via_path(self):
+        with patch("shutil.which", return_value=r"C:\fake\claude.exe"):
+            row = auth_overview()["claude-cli"]
+        assert row["configured"] is True
+        assert row["source"] == "PATH"
+
+    def test_claude_cli_absent(self):
+        with patch("shutil.which", return_value=None):
+            row = auth_overview()["claude-cli"]
+        assert row["configured"] is False
+        assert row["source"] is None
