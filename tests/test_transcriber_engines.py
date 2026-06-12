@@ -45,6 +45,29 @@ class TestEngineSelection:
             AudioTranscriber(output_dir=str(tmp_path), engine="")
 
 
+class TestEngineRouting:
+    """transcribe() must dispatch each engine to its own implementation -
+    a broken elif would silently transcribe with the wrong backend."""
+
+    @pytest.mark.parametrize("engine,method", [
+        ("whisper", "_transcribe_vanilla"),
+        ("whisperx", "_transcribe_whisperx"),
+        ("parakeet", "_transcribe_parakeet"),
+        ("parakeet-dia", "_transcribe_parakeet_dia"),
+        ("elevenlabs", "_transcribe_elevenlabs"),
+        ("openai", "_transcribe_openai"),
+    ])
+    def test_engine_routes_to_method(self, tmp_path, engine, method):
+        t = AudioTranscriber(output_dir=str(tmp_path), engine=engine,
+                             openai_api_key="k", elevenlabs_api_key="k")
+        audio = tmp_path / "a.mp3"
+        audio.write_bytes(b"x")
+        sentinel = {"text": "x", "language": "en", "text_file": "t.md"}
+        with patch.object(AudioTranscriber, method, return_value=sentinel) as m:
+            assert t.transcribe(str(audio)) == sentinel
+        m.assert_called_once()
+
+
 class TestOpenAIEngine:
     def _transcriber(self, tmp_path):
         return AudioTranscriber(output_dir=str(tmp_path), engine="openai", openai_api_key="test-key")
