@@ -13,6 +13,8 @@
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-306%20passing-brightgreen.svg)](tests/)
+[![Claude](https://img.shields.io/badge/Claude-summaries-D97757?logo=claude&logoColor=white)](https://claude.com/claude-code)
+[![NVIDIA](https://img.shields.io/badge/NVIDIA-Parakeet%20TDT-76B900?logo=nvidia&logoColor=white)](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)
 
 > Video/audio summariser - download YouTube videos, transcribe across six engines (local and cloud), and generate AI summaries using Claude/GPT models or your Claude subscription, no API key needed.
 
