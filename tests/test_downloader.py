@@ -105,6 +105,44 @@ class TestExistingFileReuse:
             dl.download_video("https://example.com/not-youtube")
 
 
+class TestDownloadVideo:
+    URL = "https://youtu.be/dQw4w9WgXcQ"
+
+    def _ydl(self, tmp_path):
+        ydl = MagicMock()
+        ydl.__enter__ = lambda s: s
+        ydl.__exit__ = MagicMock(return_value=False)
+        ydl.extract_info.return_value = {"title": "T", "duration": 9}
+        ydl.prepare_filename.return_value = str(tmp_path / "YT_dQw4w9WgXcQ_T.webm")
+        return ydl
+
+    def test_audio_download_reports_mp3_path(self, tmp_path):
+        """audio_only swaps the container extension for the post-processed
+        .mp3 - the path handed downstream must match what ffmpeg produced."""
+        dl = YouTubeDownloader(output_dir=str(tmp_path))
+        ydl = self._ydl(tmp_path)
+        with patch("sonopsis.downloader.yt_dlp.YoutubeDL", return_value=ydl):
+            result = dl.download_video(self.URL, audio_only=True)
+        assert result["audio_file"].endswith(".mp3")
+        assert result["reused_existing"] is False
+        ydl.extract_info.assert_called_once_with(self.URL, download=True)
+
+    def test_video_download_keeps_original_extension(self, tmp_path):
+        dl = YouTubeDownloader(output_dir=str(tmp_path))
+        with patch("sonopsis.downloader.yt_dlp.YoutubeDL",
+                   return_value=self._ydl(tmp_path)):
+            result = dl.download_video(self.URL, audio_only=False)
+        assert result["audio_file"].endswith(".webm")
+
+    def test_download_failure_wrapped(self, tmp_path):
+        dl = YouTubeDownloader(output_dir=str(tmp_path))
+        ydl = self._ydl(tmp_path)
+        ydl.extract_info.side_effect = RuntimeError("network down")
+        with patch("sonopsis.downloader.yt_dlp.YoutubeDL", return_value=ydl):
+            with pytest.raises(Exception, match="Failed to download video: network down"):
+                dl.download_video(self.URL)
+
+
 class TestGetPlaylistVideos:
     URL = "https://www.youtube.com/playlist?list=PLx"
 
