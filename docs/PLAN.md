@@ -1,5 +1,20 @@
 # Sonopsis Development Plan
 
+## v0.3.0 - Forma Protocol rewrite (next)
+
+Goal: rebuild the CLI surface to the [Forma Protocol](https://github.com/forma-tools/forma)
+while keeping the v0.2.0 engine/benchmark internals (`utils/`) untouched.
+
+- [ ] Typer command architecture: `sonopsis process|transcribe|summarize|engines|auth|config`
+- [ ] `sonopsis engines install <pack>` - self-managing engine packs (replaces raw `uv sync --extra`)
+- [ ] `--json` on every command; stdout = data, stderr = chrome (`Console(stderr=True)`)
+- [ ] Exit-code contract, `_error`/`_output_json` helpers, `auth login|status|logout` + keyring credentials
+- [ ] `src/sonopsis/` package layout, hatchling build, `status` field in `[tool.forma]`
+- [ ] README protocol sections (badges, Key Commands, Resources, Authentication, Links, Forma Protocol footer)
+- [ ] AGENTS.md Agent Rules (auth status check, --json usage, prompt-injection warning)
+- [ ] Menu/output redesign informed by the terminal panel design language (drop ASCII banner,
+      replace hand-rolled box padding; principles from claude-mods TERMINAL-DESIGN)
+
 ## Recent Changes
 
 ### v0.2.0 - Engines and evidence (2026-06)
