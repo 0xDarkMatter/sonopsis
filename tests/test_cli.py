@@ -229,3 +229,89 @@ class TestLegacyShims:
                                    "--gpt-model", "claude-cli"])
         assert "--engine" in argv and "--model" in argv
         assert "--transcription-engine" not in argv and "--gpt-model" not in argv
+
+    def test_already_verbed_argv_untouched(self):
+        """A modern invocation must pass through without double-shimming."""
+        assert self._shimmed_argv(["summarise", "https://youtu.be/x"]) == \
+            ["summarise", "https://youtu.be/x"]
+
+    def test_url_after_verb_does_not_trigger_summarise(self):
+        argv = self._shimmed_argv(["transcribe", "https://youtu.be/x"])
+        assert argv[0] == "transcribe"
+
+    def test_flags_only_argv_unchanged(self):
+        assert self._shimmed_argv(["--version"]) == ["--version"]
+
+    def test_engine_name_as_value_not_rewritten(self):
+        """'whisper' as an option VALUE must not be mistaken for a shortcut flag."""
+        argv = self._shimmed_argv(["summarise", "u", "--engine", "whisper"])
+        assert argv == ["summarise", "u", "--engine", "whisper"]
+
+    def test_engine_shortcut_works_with_transcribe(self):
+        argv = self._shimmed_argv(["transcribe", "u", "--openai"])
+        assert argv[-2:] == ["--engine", "openai"]
+
+
+class TestSummarisePlaylist:
+    """Playlist handling: --skip-existing, --start-from, partial failure."""
+
+    URL = "https://www.youtube.com/playlist?list=PLx"
+
+    def _invoke(self, args, videos, process_results, existing_urls=()):
+        with patch("sonopsis.cli._startup"), \
+             patch("sonopsis.cli._require_summarization_backend"), \
+             patch("sonopsis.downloader.YouTubeDownloader.is_playlist", return_value=True), \
+             patch("sonopsis.downloader.YouTubeDownloader.get_playlist_videos",
+                   return_value=videos), \
+             patch("sonopsis.pipeline.find_existing_summary",
+                   side_effect=lambda url, d: "s.md" if url in existing_urls else None), \
+             patch("sonopsis.pipeline.process_video",
+                   side_effect=process_results) as pv:
+            result = runner.invoke(app, args)
+        return result, pv
+
+    def _videos(self, n):
+        return [{"url": f"https://youtu.be/v{i}", "title": f"V{i}"} for i in range(1, n + 1)]
+
+    def _ok(self, url):
+        return {"success": True, "url": url, "title": "T",
+                "transcript_file": "t.md", "summary_file": "s.md"}
+
+    def test_skip_existing_skips_summarised_videos(self):
+        videos = self._videos(3)
+        result, pv = self._invoke(
+            ["summarise", self.URL, "--skip-existing", "--json"],
+            videos,
+            process_results=[self._ok(videos[1]["url"])],
+            existing_urls=(videos[0]["url"], videos[2]["url"]),
+        )
+        assert result.exit_code == 0
+        envelope = json.loads(result.stdout)
+        assert envelope["meta"]["count"] == 3
+        assert pv.call_count == 1  # only the un-summarised video processed
+        skipped = [row for row in envelope["data"] if row.get("skipped")]
+        assert len(skipped) == 2
+
+    def test_start_from_skips_earlier_videos(self):
+        videos = self._videos(3)
+        result, pv = self._invoke(
+            ["summarise", self.URL, "--start-from", "3", "--json"],
+            videos,
+            process_results=[self._ok(videos[2]["url"])],
+        )
+        assert result.exit_code == 0
+        assert pv.call_count == 1
+        assert pv.call_args.args[0] == videos[2]["url"]
+
+    def test_partial_failure_exits_error_with_counts(self):
+        videos = self._videos(2)
+        result, _ = self._invoke(
+            ["summarise", self.URL, "--json"],
+            videos,
+            process_results=[self._ok(videos[0]["url"]),
+                             {"success": False, "url": videos[1]["url"], "error": "boom"}],
+        )
+        assert result.exit_code == 1
+        envelope = json.loads(result.stdout)
+        assert envelope["meta"]["succeeded"] == 1
+        assert envelope["meta"]["failed"] == 1
