@@ -94,6 +94,29 @@ class TestSummariseExecution:
                               "--engine", "parakeet"])
         assert pv.call_args.kwargs["transcription_engine"] == "parakeet"
 
+    def test_all_options_reach_pipeline(self):
+        """Every summarise flag must arrive in process_video kwargs - a
+        renamed/dropped kwarg would silently fall back to defaults."""
+        _, pv = self._invoke([
+            "summarise", "https://youtu.be/dQw4w9WgXcQ",
+            "--model", "claude-cli", "--whisper-model", "small",
+            "--analysis-mode", "advanced", "--num-speakers", "3",
+            "--auto-speakers", "--keep-files",
+        ])
+        kwargs = pv.call_args.kwargs
+        assert kwargs["gpt_model"] == "claude-cli"
+        assert kwargs["whisper_model"] == "small"
+        assert kwargs["analysis_mode"] == "advanced"
+        assert kwargs["num_speakers"] == 3
+        assert kwargs["auto_speakers"] is True
+        assert kwargs["keep_files"] is True
+
+    def test_configured_paths_reach_pipeline(self):
+        _, pv = self._invoke(["summarise", "https://youtu.be/dQw4w9WgXcQ"])
+        kwargs = pv.call_args.kwargs
+        for key in ("downloads_dir", "transcripts_dir", "summaries_dir"):
+            assert kwargs[key]
+
 
 class TestSubapps:
     def test_engines_list_json(self):
