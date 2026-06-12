@@ -8,8 +8,10 @@
 
 **Core Workflow:**
 1. Download YouTube video/audio via yt-dlp
-2. Transcribe using Whisper, WhisperX, or ElevenLabs
-3. Summarize using GPT/Claude/OpenRouter models
+2. Transcribe using one of six engines: Parakeet (default local), Parakeet-dia,
+   Whisper, WhisperX, ElevenLabs, OpenAI gpt-4o-transcribe-diarize
+3. Summarize using the Claude Code CLI (default when installed) or
+   GPT/Claude/OpenRouter API models
 4. Output markdown summaries with metadata
 
 ## Key Files
@@ -18,9 +20,15 @@
 |------|---------|
 | `sonopsis.py` | Interactive menu interface (recommended entry point) |
 | `main.py` | CLI interface for scripting/automation |
+| `utils/pipeline.py` | Shared download->transcribe->summarize flow (both front-ends call this) |
 | `utils/downloader.py` | YouTube download via yt-dlp |
-| `utils/transcriber.py` | Multi-engine transcription (Whisper, WhisperX, ElevenLabs) |
+| `utils/transcriber.py` | Multi-engine transcription behind `AudioTranscriber(engine=...)` |
 | `utils/summarizer.py` | LLM summarization (OpenAI, Anthropic, OpenRouter, Claude Code CLI) |
+| `utils/models.py` | Summarization model registry (IDs, costs, limits) - single source of truth |
+| `utils/speakers.py` | Gated LLM speaker-count inference (`--auto-speakers`) |
+| `utils/config.py` | `config.yaml` loader + engine auto-default |
+| `benchmarks/` | Known-good corpora + committed WER/DER results; defaults must stay evidence-backed |
+| `scripts/benchmark_*.py` | WER and DER benchmark harnesses |
 
 ## LLM Artifacts (prose/)
 
@@ -62,14 +70,20 @@ These directories contain user output, not code. Don't commit contents.
 ## Adding New Features
 
 ### New LLM Model Support
-1. Add model name to `utils/summarizer.py` `__init__` docstring
-2. Handle API-specific parameters in `summarize()` method
-3. Update model selection in `sonopsis.py` menu
+1. Add the model to the registry in `utils/models.py` (label, provider, cost, max_tokens)
+2. Handle any API-specific parameters in `utils/summarizer.py` `_generate_once()`
+3. Menus and CLI pick it up automatically from the registry
 
 ### New Transcription Engine
-1. Add engine to `utils/transcriber.py`
-2. Update CLI args in `main.py`
-3. Add menu option in `sonopsis.py`
+1. Add an init branch + `_transcribe_<engine>()` method in `utils/transcriber.py`
+   and route it in `transcribe()`
+2. Add the engine to `ENGINE_DISPLAY` in `utils/pipeline.py`
+3. Add it to the `--transcription-engine` choices in `main.py` and the menu in `sonopsis.py`
+4. Heavy dependencies go in a new optional extra in `pyproject.toml`, with a
+   friendly ImportError hint (see `_import_onnx_asr` for the pattern)
+5. Benchmark it: `python scripts/benchmark_engines.py --engines <engine>` (and
+   `benchmark_diarization.py` if it diarizes) - update the README engine table
+   with measured numbers, not vendor claims
 
 ### New Analysis Mode
 1. Create `prose/prompts/analysis_{mode}.md`
@@ -87,10 +101,18 @@ These directories contain user output, not code. Don't commit contents.
 
 ## Testing
 
-Currently manual testing. When adding features:
-1. Test with short video first (< 5 min)
-2. Test all transcription engines if touching that code
-3. Test both CLI and interactive modes
+```bash
+uv run --extra dev pytest tests -q              # unit suite (~127 tests, fast, no network)
+RUN_E2E=1 uv run --extra dev --extra whisper pytest tests/e2e -v   # real pipeline + live APIs
+python scripts/benchmark_engines.py             # WER vs known-good corpus
+python scripts/benchmark_diarization.py         # DER vs exact RTTMs
+```
+
+When adding features:
+1. Unit tests are mandatory; mock network/model access (see existing test files)
+2. Touching engine code? Run the relevant benchmark and the gated e2e tests
+3. Test with a short video first (the e2e suite uses the 19s "Me at the zoo")
+4. Test both CLI and interactive modes
 
 ## Dependencies
 
@@ -101,8 +123,12 @@ External services required:
 - Claude Code CLI (optional, `claude-cli*` models - summarizes on the user's Claude subscription, no API key)
 - OpenRouter API (optional, for Kimi/GLM models)
 - ElevenLabs API (optional, for cloud transcription)
-- Hugging Face (optional, for WhisperX speaker diarization)
+- Hugging Face token (optional, for pyannote diarization - parakeet-dia and
+  WhisperX; requires accepting terms on the gated pyannote models, including
+  `pyannote/speaker-diarization-community-1` for pyannote 4.x)
 
 Local requirements:
 - FFmpeg (required for audio processing)
-- Python packages per `requirements.txt`
+- Python 3.11+; dependencies via `uv sync` plus optional extras
+  (`whisper`, `parakeet`, `diarize`, `elevenlabs`) - `requirements.txt`
+  is a legacy pip fallback only

@@ -35,6 +35,8 @@ rather than a leaderboard claim.
   noise, crosstalk, held-out set) with by-construction RTTMs.
 - **Resumable playlists**: `--skip-existing` skips videos that already have
   a summary on disk.
+- **Shorter CLI flags**: `--engine` and `--model` are the primary spellings;
+  `--transcription-engine` and `--gpt-model` remain as compatible aliases.
 - **Optional-extra installs**: `uv sync --extra whisper|elevenlabs|parakeet|diarize`
   keeps the core install light (~50MB); heavy engines are opt-in.
 - **`sonopsis-tui` entry point** for the interactive interface.
@@ -83,8 +85,44 @@ rather than a leaderboard claim.
 - ~200 lines of dead interactive-menu code (including a latent `KeyError`).
 - Dead SRT timestamp parser.
 
-## [0.1.0] - 2026-04
+## [0.1.0] - 2026-04-04
 
-- Initial release: YouTube download (yt-dlp), Whisper/WhisperX/ElevenLabs
-  transcription, GPT/Claude/OpenRouter summarization, interactive menu and
-  CLI front-ends, prompt templates in `prose/`.
+First tagged release, packaging six months of development for installation
+via `uv tool install`. The phases below were untagged; dates are from
+commit history.
+
+### Packaging (2026-04)
+
+- `pyproject.toml` with Forma metadata; `sonopsis` console entry point.
+- Initial pytest suite (imports, config shape, prose files, CLI parser,
+  summarizer utilities).
+
+### Structure reorganisation (2026-01)
+
+- LLM artifacts moved into `prose/` (system prompt, basic/advanced analysis
+  prompts, speaker-identification protocol) - prompts are files, not
+  hardcoded strings.
+- `AGENTS.md` (AI assistant instructions) and `config.yaml` introduced.
+- Output conventions settled: `downloads/`, `transcripts/`, `summaries/`.
+
+### Multi-engine, multi-model era (2025-11)
+
+- **ElevenLabs Scribe** cloud transcription: SRT timestamps, speaker
+  diarization, audio-event tags, clickable YouTube bookmark links in
+  summaries.
+- Multi-provider summarization: Anthropic Claude and OpenRouter
+  (Kimi K2, GLM) alongside OpenAI GPT.
+- `YT_{video_id}_{title}` file naming plus comprehensive YouTube metadata
+  in summary headers (views, likes, tags, chapters, description).
+- Speaker-identification system: SPEAKER_X labels mapped to real names
+  using title/description clues.
+
+### Initial release (2025-10)
+
+- Core pipeline: yt-dlp download -> Whisper transcription -> GPT
+  summarization, with playlist batch processing.
+- **WhisperX** engine with optional pyannote speaker diarization
+  (HF token onboarding flow, GPU detection).
+- Interactive menu interface (arrow-key navigation) and scriptable CLI.
+- Basic (5-section) and Advanced (9-section) analysis modes with external
+  prompt templates.

@@ -18,10 +18,15 @@ A Python application that downloads YouTube videos, transcribes them using OpenA
 - **Interactive Menu Interface**: Beautiful Claude Code-style menus with keyboard navigation
 - **Download YouTube Videos**: Automatically downloads videos and extracts audio
 - **Playlist Batch Processing**: Process entire YouTube playlists with one command
-- **Multiple Transcription Engines**:
-  - **Whisper**: Local transcription (free, no speaker labels)
+- **Six Transcription Engines**:
+  - **Parakeet** (default when installed): NVIDIA TDT 0.6B v3 - local, free, no PyTorch, beats Whisper accuracy on the project benchmarks
+  - **Parakeet-dia**: Parakeet + pyannote speaker diarization (free, local, requires HF token)
+  - **Whisper**: Local transcription (free, robust on degraded audio)
   - **WhisperX**: Local with speaker diarization (free, requires HF token)
   - **ElevenLabs**: Cloud transcription (paid, 99 languages, speaker diarization + audio events)
+  - **OpenAI**: gpt-4o-transcribe-diarize (paid, best speaker counting measured, reuses your OpenAI key)
+- **Speaker Intelligence**: `--num-speakers` hints and `--auto-speakers` (LLM infers the count from video metadata, applied only at high confidence)
+- **Benchmarked Defaults**: engine choices are backed by committed WER/DER results against known-good corpora in `benchmarks/`
 - **YouTube Bookmark Links**: ElevenLabs transcripts include clickable timestamps that jump to exact moments in the video
 - **Two Analysis Modes**: Choose between Basic (5 sections) or Advanced (9 sections) summaries
 - **External Prompt Files**: Easily customize analysis prompts via markdown files
@@ -67,23 +72,32 @@ sudo yum install ffmpeg  # CentOS/RHEL
 
 2. **Install Python dependencies:**
 ```bash
-# Core install (summarization + ElevenLabs-ready, no local models)
+# Core install (summarization + ElevenLabs/OpenAI cloud engines, no local models)
 uv sync
 
-# Add local Whisper transcription (downloads PyTorch CPU wheels, ~2GB)
-uv sync --extra whisper
+# Engine packs - install only what you need:
+uv sync --extra parakeet    # NVIDIA Parakeet, recommended local engine (~70MB deps, no PyTorch)
+uv sync --extra whisper     # Whisper/WhisperX (downloads PyTorch CPU wheels, ~2GB)
+uv sync --extra diarize     # pyannote speaker diarization for parakeet-dia/WhisperX
+uv sync --extra elevenlabs  # ElevenLabs cloud SDK
 
-# Add ElevenLabs cloud transcription SDK
-uv sync --extra elevenlabs
+# Extras combine freely:
+uv sync --extra parakeet --extra diarize
 
 # Legacy pip fallback
 pip install -r requirements.txt
 ```
 
+> **Why "--extra"?** These are standard Python [optional dependencies](https://packaging.python.org/en/latest/specifications/dependency-groups/)
+> (the packaging ecosystem calls them "extras" - the same mechanism as
+> `pip install "sonopsis[parakeet]"`). uv spells it `--extra <name>`. Sonopsis
+> uses them so the core install stays ~50MB: heavy engine stacks like PyTorch
+> are opt-in rather than forced on everyone.
+
 > **No API key?** If the [Claude Code CLI](https://claude.com/claude-code) is installed,
 > Sonopsis automatically uses it for summarization on your Claude Pro/Max subscription -
 > no `ANTHROPIC_API_KEY` needed. Select "Claude Code (Max plan)" in the interactive menu,
-> or pass `--gpt-model claude-cli` (optionally `claude-cli/sonnet`, `claude-cli/opus`,
+> or pass `--model claude-cli` (optionally `claude-cli/sonnet`, `claude-cli/opus`,
 > `claude-cli/haiku`).
 
 3. **Set up your API keys:**
@@ -117,13 +131,13 @@ HF_TOKEN=your_huggingface_token_here
 
 **v0.2.0** (June 2026)
 
-*   🚀 **Claude Code CLI summarization** - Summarize on your Claude Pro/Max subscription with no API key: `--gpt-model claude-cli` (or `/sonnet`, `/opus`, `/haiku`). Auto-selected as the default whenever the CLI is installed.
+*   🚀 **Claude Code CLI summarization** - Summarize on your Claude Pro/Max subscription with no API key: `--model claude-cli` (or `/sonnet`, `/opus`, `/haiku`). Auto-selected as the default whenever the CLI is installed.
 *   🆕 **NVIDIA Parakeet engine, new local default** - TDT 0.6B v3 via onnx-asr: no PyTorch, ~670MB, and 0% WER on clean wideband audio where Whisper scored 3-20% on the project's known-good corpus. `uv sync --extra parakeet`.
 *   🗣️ **Free local speaker diarization** - `parakeet-dia` pairs pyannote speaker turns with Parakeet transcription, beating ElevenLabs on crosstalk (9.0% vs 15.0% DER). `--num-speakers N` sharpens it further; `--auto-speakers` infers the count from video metadata, applied only at high confidence.
 *   🔌 **OpenAI gpt-4o-transcribe-diarize engine** - The best speaker counter measured: 9/9 perfect counts unhinted, including a 5-speaker panel. Reuses your existing `OPENAI_API_KEY`; oversized or rejected uploads auto re-encode to Opus.
 *   🧪 **Benchmark suite with known-good corpora** - WER and DER rubrics against exact-reference audio (31 samples across clean, noisy, narrowband, crosstalk and multi-speaker conditions). Every engine default above is backed by a committed result in `benchmarks/`, not a leaderboard claim.
 *   ⚡ **Silence-aligned chunking** - Long-audio chunk boundaries snap to detected silences instead of cutting mid-word; a forced-boundary stress test went from 43.4% WER to 0.0%.
-*   🔧 **Quality-of-life overhaul** - `config.yaml` is actually loaded now, playlists resume with `--skip-existing`, menus work beyond Windows, transient API errors retry, and the suite grew from 44 to 127 tests plus gated e2e runs against real backends.
+*   🔧 **Quality-of-life overhaul** - `config.yaml` is actually loaded now, playlists resume with `--skip-existing`, menus work beyond Windows, transient API errors retry, flags got shorter (`--engine`, `--model`; old spellings still work), and the suite grew from 44 to 127 tests plus gated e2e runs against real backends.
 
 [View full changelog →](CHANGELOG.md)
 
@@ -189,35 +203,44 @@ python main.py <YouTube_URL>
 python main.py https://www.youtube.com/watch?v=dQw4w9WgXcQ
 
 # Summarize on your Claude subscription via the Claude Code CLI (no API key)
-python main.py <URL> --gpt-model claude-cli
-python main.py <URL> --gpt-model claude-cli/opus
+python main.py <URL> --model claude-cli
+python main.py <URL> --model claude-cli/opus
 
 # Process an entire playlist
 python main.py "https://www.youtube.com/playlist?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf"
 
+# Local diarization: Parakeet + pyannote, auto-inferring the speaker count
+python main.py <URL> --engine parakeet-dia --auto-speakers
+
+# Local diarization with a known speaker count (measurably more accurate)
+python main.py <URL> --engine parakeet-dia --num-speakers 2
+
 # Use WhisperX for speaker diarization (local, free)
-python main.py <URL> --transcription-engine whisperx
+python main.py <URL> --engine whisperx
 
 # Use ElevenLabs for cloud transcription (99 languages, speaker diarization)
-python main.py <URL> --transcription-engine elevenlabs
+python main.py <URL> --engine elevenlabs
+
+# Use OpenAI gpt-4o-transcribe-diarize (best speaker counting measured)
+python main.py <URL> --engine openai
 
 # Use a larger Whisper model for better accuracy
 python main.py https://youtu.be/dQw4w9WgXcQ --whisper-model small
 
 # Use Claude Sonnet for highest quality summaries
-python main.py <URL> --gpt-model claude-sonnet-4-6
+python main.py <URL> --model claude-sonnet-4-6
 
 # Use GPT-5.1 for complex reasoning
-python main.py <URL> --gpt-model gpt-5.1
+python main.py <URL> --model gpt-5.1
 
 # Use Kimi K2 (long context specialist via OpenRouter)
-python main.py <URL> --gpt-model openrouter/moonshot/kimi-k2
+python main.py <URL> --model openrouter/moonshot/kimi-k2
 
 # Use GLM 4.6 Plus (Chinese + multilingual via OpenRouter)
-python main.py <URL> --gpt-model openrouter/zhipuai/glm-4.6-plus
+python main.py <URL> --model openrouter/zhipuai/glm-4.6-plus
 
 # Process playlist with ElevenLabs transcription and Claude
-python main.py <PLAYLIST_URL> --transcription-engine elevenlabs --gpt-model claude-haiku-4-5-20251001
+python main.py <PLAYLIST_URL> --engine elevenlabs --model claude-haiku-4-5-20251001
 
 # Keep downloaded audio files
 python main.py <URL> --keep-files
@@ -226,13 +249,13 @@ python main.py <URL> --keep-files
 ### Command Line Options
 
 - `url` (required): YouTube video or playlist URL
-- `--transcription-engine`: Transcription engine to use (default: `whisper`)
+- `--engine` (alias `--transcription-engine`): Transcription engine to use (default: `whisper`)
   - `whisper`: Local transcription, free, no speaker labels
   - `whisperx`: Local with speaker diarization, free (requires HF_TOKEN)
   - `elevenlabs`: Cloud transcription, paid, 99 languages, speaker diarization + audio events
 - `--whisper-model`: Whisper model size - `tiny`, `base`, `small`, `medium`, `large` (default: `base`)
   - Only applies to `whisper` and `whisperx` engines
-- `--gpt-model`: AI model for summaries (default: `claude-cli` when the Claude Code CLI is installed, else `claude-sonnet-4-6`)
+- `--model` (alias `--gpt-model`): AI model for summaries (default: `claude-cli` when the Claude Code CLI is installed, else `claude-sonnet-4-6`)
   - Claude Code CLI (subscription): `claude-cli`, `claude-cli/sonnet`, `claude-cli/opus`, `claude-cli/haiku`
   - Anthropic Claude: `claude-sonnet-4-6`, `claude-haiku-4-5-20251001`, `claude-opus-4-8`
   - OpenAI: `gpt-4o-mini`, `gpt-4o`, `gpt-5.1`
@@ -260,11 +283,12 @@ The tool automatically detects playlist URLs and processes all videos sequential
 
 | Engine      | Cost  | Speed      | Languages | Speaker ID | Audio Events | Timestamps | Notes                           |
 |-------------|-------|------------|-----------|------------|--------------|------------|--------------------------------|
-| Whisper     | Free  | Fast       | ~60       | No         | No           | No         | Best for quick, simple transcription |
-| WhisperX    | Free  | Medium     | ~60       | Yes        | No           | No         | Requires HF token, GPU recommended |
-| Parakeet    | Free  | Very Fast  | 25 (EU)   | No         | No           | No         | NVIDIA TDT 0.6B v3 - beats Whisper accuracy, no PyTorch, ~670MB model, CPU-friendly (`uv sync --extra parakeet`) |
-| ElevenLabs  | Paid* | Very Fast  | 99        | Yes (32)   | Yes          | Yes        | Cloud-based, YouTube bookmarks  |
-| OpenAI      | Paid ($0.36/hr) | Very Fast | ~60 | Yes      | No           | Yes        | gpt-4o-transcribe-diarize - reuses your OPENAI_API_KEY, files >25MB auto re-encoded |
+| Parakeet    | Free  | Very Fast  | 25 (EU)   | No         | No           | No         | NVIDIA TDT 0.6B v3 - beats Whisper accuracy, no PyTorch, ~670MB model, CPU-friendly (`--extra parakeet`) |
+| Parakeet-dia| Free  | Medium     | 25 (EU)   | Yes        | No           | Turn-level | Parakeet + pyannote; best crosstalk handling measured (`--extra parakeet --extra diarize` + HF token) |
+| Whisper     | Free  | Fast       | ~60       | No         | No           | No         | Most robust on degraded/telephony audio (`--extra whisper`) |
+| WhisperX    | Free  | Medium     | ~60       | Yes        | No           | No         | Requires HF token, GPU recommended (`--extra whisper --extra diarize`) |
+| ElevenLabs  | Paid* | Very Fast  | 99        | Yes (32)   | Yes          | Word-level | Cloud-based, YouTube bookmarks  |
+| OpenAI      | Paid ($0.36/hr) | Very Fast | ~60 | Yes      | No           | Yes        | gpt-4o-transcribe-diarize - best speaker counting measured (9/9 unhinted); >25MB uploads auto re-encoded |
 
 \* ElevenLabs offers a free tier with 2.5 hours/month included
 
@@ -358,25 +382,33 @@ Detailed content...
 
 ## Module Documentation
 
-### downloader.py
-Downloads YouTube videos and extracts audio using yt-dlp.
+| Module | Purpose |
+|---|---|
+| `utils/pipeline.py` | Shared download → transcribe → summarize flow used by both front-ends (`process_video()`) |
+| `utils/downloader.py` | YouTube download via yt-dlp (`download_video()`, `get_playlist_videos()`, cached-audio reuse) |
+| `utils/transcriber.py` | All six transcription engines behind one `AudioTranscriber(engine=...).transcribe()` interface |
+| `utils/summarizer.py` | Summarization across OpenAI / Anthropic / OpenRouter APIs and the Claude Code CLI, with retry |
+| `utils/models.py` | Single registry of summarization models (IDs, costs, output limits) feeding menus and CLI |
+| `utils/speakers.py` | Gated LLM speaker-count inference from video metadata (`--auto-speakers`) |
+| `utils/config.py` | `config.yaml` loader and engine auto-default logic |
 
-**Key Functions:**
-- `download_video(url, audio_only=True)`: Downloads video/audio
-- `get_video_info(url)`: Gets metadata without downloading
+## Benchmarks
 
-### transcriber.py
-Transcribes audio files using OpenAI's Whisper model.
+Engine defaults are evidence-based: `benchmarks/` contains exact-reference
+corpora (clean/noisy/narrowband speech with verified transcripts;
+multi-speaker conversations with by-construction RTTMs) plus committed
+results. Reproduce or extend with:
 
-**Key Functions:**
-- `transcribe(audio_file, language=None)`: Transcribes audio to text
-- `transcribe_with_timestamps(audio_file)`: Creates timestamped transcript
+```bash
+python scripts/benchmark_engines.py --engines parakeet whisper:base elevenlabs openai
+python scripts/benchmark_diarization.py --engines parakeet-dia elevenlabs openai
+python scripts/make_diarization_corpus.py   # regenerate conversation corpora
+```
 
-### summarizer.py
-Generates summaries using OpenAI's GPT models.
-
-**Key Functions:**
-- `summarize(transcript, video_metadata)`: Creates comprehensive summary
+Headlines from the committed runs: Parakeet 0% WER on clean wideband (Whisper
+3-20%); silence-aligned chunking eliminated boundary errors (43.4% → 0% on a
+stress test); OpenAI counted speakers perfectly on 9/9 conversations; and
+parakeet-dia beat ElevenLabs on crosstalk (9.0% vs 15.0% DER).
 
 ## Cost Considerations
 
@@ -443,19 +475,19 @@ Use a smaller model: `--whisper-model tiny` or `--whisper-model base`
 
 ## Performance Tips
 
-**Transcription:**
-1. **Fastest**: Use `--transcription-engine elevenlabs` (cloud, requires API key)
-2. **Free + Fast**: Use `--whisper-model tiny` or `--whisper-model base`
-3. **Free + Speaker ID**: Use `--transcription-engine whisperx` (requires HF token, GPU recommended)
-4. **Best accuracy**: Use `--transcription-engine elevenlabs` or `--whisper-model large`
-5. **99 languages**: Use `--transcription-engine elevenlabs`
+**Transcription** (rankings backed by `benchmarks/`):
+1. **Best free accuracy**: `--engine parakeet` (0% WER on clean wideband in the project corpus)
+2. **Free + Speaker ID**: `--engine parakeet-dia` (add `--num-speakers N` or `--auto-speakers` for 3+ speakers)
+3. **Degraded/telephony audio**: `--engine whisper` (most robust on awful recordings)
+4. **Best speaker counting**: `--engine openai` (9/9 perfect counts unhinted, incl. 5-speaker panels)
+5. **99 languages / audio events / word-level bookmarks**: `--engine elevenlabs`
 
 **Summarization:**
-1. **Lower costs**: Use `--gpt-model gpt-4o-mini` or `--gpt-model claude-haiku-4-5-20251001`
-2. **Higher quality**: Use `--gpt-model claude-sonnet-4-6`
-3. **Complex reasoning**: Use `--gpt-model gpt-5.1` (latest OpenAI reasoning model)
-4. **Long context**: Use `--gpt-model openrouter/moonshot/kimi-k2` (200K+ tokens)
-5. **Multilingual**: Use `--gpt-model openrouter/zhipuai/glm-4.6-plus` (excellent for Chinese)
+1. **Lower costs**: Use `--model gpt-4o-mini` or `--model claude-haiku-4-5-20251001`
+2. **Higher quality**: Use `--model claude-sonnet-4-6`
+3. **Complex reasoning**: Use `--model gpt-5.1` (latest OpenAI reasoning model)
+4. **Long context**: Use `--model openrouter/moonshot/kimi-k2` (200K+ tokens)
+5. **Multilingual**: Use `--model openrouter/zhipuai/glm-4.6-plus` (excellent for Chinese)
 
 ## Advanced Usage
 
