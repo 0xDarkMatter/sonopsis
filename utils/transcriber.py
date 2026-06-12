@@ -724,6 +724,18 @@ class AudioTranscriber:
 
     OPENAI_UPLOAD_LIMIT = 24 * 1024 * 1024  # API rejects files over 25MB
 
+    def _reencode_opus(self, audio_path: Path) -> Path:
+        """Re-encode to 16kbps mono Opus - small and universally accepted."""
+        compact = audio_path.with_suffix('.openai.ogg')
+        result = subprocess.run(
+            ['ffmpeg', '-y', '-i', str(audio_path), '-ac', '1', '-c:a', 'libopus',
+             '-b:a', '16k', '-application', 'voip', str(compact)],
+            capture_output=True, text=True, timeout=1800,
+        )
+        if result.returncode != 0 or not compact.exists():
+            raise Exception(f"ffmpeg re-encode failed: {result.stderr[-300:]}")
+        return compact
+
     def _prepare_for_openai(self, audio_path: Path) -> Path:
         """
         Ensure the upload fits the OpenAI 25MB file limit.
@@ -735,15 +747,8 @@ class AudioTranscriber:
         if audio_path.stat().st_size <= self.OPENAI_UPLOAD_LIMIT:
             return audio_path
 
-        compact = audio_path.with_suffix('.openai.ogg')
         print(f"[*] Audio exceeds OpenAI's 25MB limit - re-encoding to 16kbps mono Opus...")
-        result = subprocess.run(
-            ['ffmpeg', '-y', '-i', str(audio_path), '-ac', '1', '-c:a', 'libopus',
-             '-b:a', '16k', '-application', 'voip', str(compact)],
-            capture_output=True, text=True, timeout=1800,
-        )
-        if result.returncode != 0 or not compact.exists():
-            raise Exception(f"ffmpeg re-encode failed: {result.stderr[-300:]}")
+        compact = self._reencode_opus(audio_path)
         if compact.stat().st_size > self.OPENAI_UPLOAD_LIMIT:
             raise Exception(
                 "Audio still exceeds OpenAI's 25MB limit after re-encoding "
@@ -766,18 +771,30 @@ class AudioTranscriber:
             print(f"[*] Uploading and transcribing with gpt-4o-transcribe-diarize...")
             print(f"[*] Audio duration: {self._format_timestamp(duration)}")
 
-            with open(upload_path, 'rb') as audio_file:
-                params: Dict[str, Any] = {
-                    "model": "gpt-4o-transcribe-diarize",
-                    "file": audio_file,
-                    # diarized_json is required to receive speaker annotations;
-                    # chunking_strategy is mandatory for audio over 30 seconds
-                    "response_format": "diarized_json",
-                    "chunking_strategy": "auto",
-                }
-                if language:
-                    params["language"] = language
-                response = client.audio.transcriptions.create(**params)
+            def submit(path: Path):
+                with open(path, 'rb') as audio_file:
+                    params: Dict[str, Any] = {
+                        "model": "gpt-4o-transcribe-diarize",
+                        "file": audio_file,
+                        # diarized_json is required to receive speaker annotations;
+                        # chunking_strategy is mandatory for audio over 30 seconds
+                        "response_format": "diarized_json",
+                        "chunking_strategy": "auto",
+                    }
+                    if language:
+                        params["language"] = language
+                    return client.audio.transcriptions.create(**params)
+
+            try:
+                response = submit(upload_path)
+            except Exception as api_error:
+                # Some container/codec flavors are rejected outright; a plain
+                # Opus re-encode is universally accepted - retry once
+                if 'corrupted or unsupported' not in str(api_error) or upload_path != audio_path:
+                    raise
+                print(f"[!] Format rejected by OpenAI - re-encoding to Opus and retrying...")
+                upload_path = self._reencode_opus(audio_path)
+                response = submit(upload_path)
 
             # Clean up the temporary re-encoded file
             if upload_path != audio_path:

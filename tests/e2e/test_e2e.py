@@ -18,8 +18,11 @@ import sys
 from pathlib import Path
 
 import pytest
+from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
+# E2E tests exercise real backends - pick up API keys from the project .env
+load_dotenv(PROJECT_ROOT / ".env")
 TEST_VIDEO_URL = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
 TEST_VIDEO_ID = "jNQXAC9IVRw"
 
