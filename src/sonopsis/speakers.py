@@ -73,7 +73,7 @@ def infer_speaker_count(video_metadata: Dict[str, Any]) -> Optional[int]:
         prediction = json.loads(match.group(0))
 
         count = prediction.get("num_speakers")
-        if prediction.get("confidence") != "high":
+        if str(prediction.get("confidence", "")).lower() != "high":
             return None
         if not isinstance(count, int) or not (1 <= count <= MAX_REASONABLE_SPEAKERS):
             return None

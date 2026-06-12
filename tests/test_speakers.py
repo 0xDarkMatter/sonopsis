@@ -48,6 +48,15 @@ class TestGate:
     def test_non_integer_rejected(self):
         assert _run({"num_speakers": "two", "confidence": "high", "rationale": "x"}) is None
 
+    def test_confidence_case_insensitive(self):
+        """LLMs sometimes capitalize - 'High' must not silently disable the feature."""
+        assert _run({"num_speakers": 2, "confidence": "High", "rationale": "x"}) == 2
+        assert _run({"num_speakers": 2, "confidence": "HIGH", "rationale": "x"}) == 2
+        assert _run({"num_speakers": 2, "confidence": "Medium", "rationale": "x"}) is None
+
+    def test_missing_confidence_key_rejected(self):
+        assert _run({"num_speakers": 2, "rationale": "x"}) is None
+
 
 class TestFailureModes:
     def test_no_cli_returns_none(self):
