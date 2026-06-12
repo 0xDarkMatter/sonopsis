@@ -410,12 +410,17 @@ class ContentSummarizer:
             duration=self._format_duration(metadata.get('duration', 0)),
             url=url,
             video_id=video_id,
-            transcript=transcript
         )
 
         # Append speaker mapping guidance
         if speaker_mapping:
             prompt = prompt + speaker_mapping
+
+        # Append the transcript itself, in code rather than via a template
+        # placeholder: str.format silently drops unused kwargs, so a template
+        # missing {transcript} would otherwise send the model metadata only -
+        # and it will happily fabricate a summary from the title alone.
+        prompt += f"\n\n---\n\n**TRANSCRIPT:**\n\n{transcript}\n"
 
         return prompt
 

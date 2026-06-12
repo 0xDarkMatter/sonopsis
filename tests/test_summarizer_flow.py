@@ -166,3 +166,30 @@ class TestFormatOutputHeader:
         out = self._formatted(tmp_path, monkeypatch)
         assert out.endswith("THE BODY")
         assert out.index("Processing Information") < out.index("THE BODY")
+
+
+class TestCreateSummaryPrompt:
+    URL = "https://youtu.be/dQw4w9WgXcQ"
+
+    def _summarizer(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "k")
+        return ContentSummarizer(model="gpt-4o-mini", output_dir=str(tmp_path))
+
+    def _metadata(self):
+        return {"title": "My Talk", "uploader": "Chan", "duration": 90,
+                "url": self.URL}
+
+    @pytest.mark.parametrize("mode", ["basic", "advanced"])
+    def test_templates_fill_placeholders(self, tmp_path, monkeypatch, mode):
+        s = self._summarizer(tmp_path, monkeypatch)
+        prompt = s._create_summary_prompt("UNIQUE-TRANSCRIPT-TOKEN",
+                                          self._metadata(), mode)
+        assert "UNIQUE-TRANSCRIPT-TOKEN" in prompt
+        assert "My Talk" in prompt
+        assert "dQw4w9WgXcQ" in prompt
+        assert "{title}" not in prompt and "{transcript}" not in prompt
+
+    def test_unknown_mode_raises(self, tmp_path, monkeypatch):
+        s = self._summarizer(tmp_path, monkeypatch)
+        with pytest.raises(FileNotFoundError, match="analysis_nope"):
+            s._create_summary_prompt("t", self._metadata(), "nope")
