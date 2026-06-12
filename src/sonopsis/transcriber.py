@@ -49,6 +49,13 @@ class AudioTranscriber:
         # pre-0.2.0 library callers keep working unchanged
         if engine is None:
             engine = "whisperx" if use_whisperx else "elevenlabs" if use_elevenlabs else "whisper"
+        valid_engines = ("whisper", "whisperx", "parakeet", "parakeet-dia",
+                         "elevenlabs", "openai")
+        if engine not in valid_engines:
+            raise ValueError(
+                f"Unknown transcription engine '{engine}'. "
+                f"Valid engines: {', '.join(valid_engines)}"
+            )
         self.engine = engine
         self.use_whisperx = (engine == "whisperx")
         self.use_elevenlabs = (engine == "elevenlabs")

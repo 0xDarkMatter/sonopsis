@@ -34,6 +34,16 @@ class TestEngineSelection:
         with pytest.raises(ImportError, match="uv sync --extra parakeet"):
             AudioTranscriber(output_dir=str(tmp_path), engine="parakeet")
 
+    def test_unknown_engine_raises_instead_of_silent_whisper(self, tmp_path):
+        """A typo'd engine name must fail fast, not quietly load a 150MB
+        Whisper model and transcribe with the wrong engine."""
+        with pytest.raises(ValueError, match="Unknown transcription engine 'bogus'"):
+            AudioTranscriber(output_dir=str(tmp_path), engine="bogus")
+
+    def test_empty_string_engine_rejected(self, tmp_path):
+        with pytest.raises(ValueError, match="Unknown transcription engine"):
+            AudioTranscriber(output_dir=str(tmp_path), engine="")
+
 
 class TestOpenAIEngine:
     def _transcriber(self, tmp_path):
