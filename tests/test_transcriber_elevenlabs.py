@@ -46,8 +46,11 @@ def _segmented_response(words, language="en"):
 
 
 class TestPreflightChecks:
-    def test_missing_key_raises(self, tmp_path):
+    def test_missing_key_raises(self, tmp_path, monkeypatch):
+        # _startup in earlier tests may have exported a real key from .env
+        monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
         t = _t(tmp_path, key=None)
+        t.elevenlabs_api_key = None
         modules, _ = _fake_sdk(SimpleNamespace())
         with patch.dict(sys.modules, modules):
             with pytest.raises(Exception, match="API key"):
