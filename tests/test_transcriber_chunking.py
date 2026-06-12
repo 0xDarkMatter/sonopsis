@@ -113,3 +113,43 @@ class TestOpenAIUploadPrep:
                    return_value=MagicMock(returncode=1, stderr="codec missing")):
             with pytest.raises(Exception, match="codec missing"):
                 t._reencode_opus(audio)
+
+
+class TestDurationProbe:
+    """_get_audio_duration must degrade to 0, never raise - it feeds progress
+    display and chunk planning, not correctness."""
+
+    def _probe(self, run_result=None, side_effect=None):
+        target = "sonopsis.transcriber.subprocess.run"
+        patcher = (patch(target, side_effect=side_effect) if side_effect
+                   else patch(target, return_value=run_result))
+        with patcher:
+            return AudioTranscriber._get_audio_duration("a.mp3")
+
+    def test_parses_ffprobe_json(self):
+        out = '{"format": {"duration": "123.45"}}'
+        assert self._probe(MagicMock(returncode=0, stdout=out)) == 123.45
+
+    def test_ffprobe_failure_returns_zero(self):
+        assert self._probe(MagicMock(returncode=1, stdout="")) == 0
+
+    def test_garbage_json_returns_zero(self):
+        assert self._probe(MagicMock(returncode=0, stdout="not json")) == 0
+
+    def test_missing_duration_field_returns_zero(self):
+        assert self._probe(MagicMock(returncode=0, stdout='{"format": {}}')) == 0
+
+    def test_ffprobe_not_installed_returns_zero(self):
+        assert self._probe(side_effect=FileNotFoundError("no ffprobe")) == 0
+
+
+class TestFormatTimestamp:
+    @pytest.mark.parametrize("seconds,expected", [
+        (0, "00:00:00"),
+        (59.9, "00:00:59"),
+        (61, "00:01:01"),
+        (3661, "01:01:01"),
+        (36000, "10:00:00"),
+    ])
+    def test_format(self, seconds, expected):
+        assert AudioTranscriber._format_timestamp(seconds) == expected
