@@ -5,7 +5,7 @@ Tests for the model registry (src/sonopsis/models.py).
 from unittest.mock import patch
 
 from sonopsis.models import (
-    MODELS, PROVIDER_ENV_KEYS,
+    DEFAULT_API_MODEL, DEFAULT_CLI_MODEL, MODELS, PROVIDER_ENV_KEYS,
     available_models, get_max_tokens, get_model_info,
 )
 
@@ -26,6 +26,14 @@ class TestRegistryIntegrity:
         for model_id, info in MODELS.items():
             if info["provider"] == "anthropic":
                 assert "max_tokens" in info, f"{model_id} missing max_tokens"
+
+    def test_default_models_exist_and_are_offered(self):
+        """The defaults the CLI falls back to must be registered, visible,
+        and on the provider their fallback logic assumes."""
+        assert MODELS[DEFAULT_API_MODEL]["provider"] == "anthropic"
+        assert not MODELS[DEFAULT_API_MODEL].get("hidden")
+        assert MODELS[DEFAULT_CLI_MODEL]["provider"] == "claude-cli"
+        assert not MODELS[DEFAULT_CLI_MODEL].get("hidden")
 
 
 class TestLookups:

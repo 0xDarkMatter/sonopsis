@@ -154,6 +154,14 @@ class TestSubapps:
         assert "defaults" in envelope["data"]
         assert "paths" in envelope["data"]
 
+    def test_config_show_resolves_engine_to_valid_choice(self):
+        """Agents read transcription_engine_resolved to pick an engine - it
+        must always be a real engine name, never None."""
+        result = runner.invoke(app, ["config", "show", "--json"])
+        resolved = json.loads(result.stdout)["data"]["defaults"][
+            "transcription_engine_resolved"]
+        assert resolved in ENGINES
+
 
 class TestAuthFlows:
     def test_login_stores_in_keyring(self):
