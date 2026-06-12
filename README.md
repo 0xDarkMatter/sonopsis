@@ -227,6 +227,8 @@ python main.py <URL> --keep-files
 - `--keep-files`: Keep downloaded audio files after processing
 - `--start-from`: Start processing from video number (for playlists, default: 1)
 - `--skip-existing`: Skip videos that already have a summary on disk (makes playlist runs resumable)
+- `--num-speakers N`: Known speaker count for diarizing engines (`parakeet-dia`) - measurably improves speaker detection
+- `--auto-speakers`: Infer the speaker count from video metadata via the Claude Code CLI (applied only at high confidence; a few seconds per video)
 
 Defaults for models, engine, analysis mode and output paths can also be set in `config.yaml`.
 

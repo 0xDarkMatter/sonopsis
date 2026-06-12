@@ -109,6 +109,7 @@ def process_playlist(url: str, args, paths: dict):
                 keep_files=args.keep_files,
                 transcription_engine=args.transcription_engine,
                 num_speakers=args.num_speakers,
+                auto_speakers=args.auto_speakers,
                 video_num=idx,
                 total_videos=len(videos),
                 downloads_dir=paths['downloads'],
@@ -248,6 +249,13 @@ Examples:
              "constrains clustering and measurably improves speaker detection"
     )
 
+    parser.add_argument(
+        "--auto-speakers",
+        action="store_true",
+        help="Infer the speaker count from video metadata via the Claude Code CLI "
+             "(diarizing engines only; applied only at high confidence, ~10s per video)"
+    )
+
     return parser
 
 
@@ -289,6 +297,7 @@ def main():
             keep_files=args.keep_files,
             transcription_engine=args.transcription_engine,
             num_speakers=args.num_speakers,
+                auto_speakers=args.auto_speakers,
             downloads_dir=paths['downloads'],
             transcripts_dir=paths['transcripts'],
             summaries_dir=paths['summaries'],

@@ -15,8 +15,12 @@ from typing import Any, Dict, Optional
 from colorama import Fore, Style
 
 from utils.downloader import YouTubeDownloader
+from utils.speakers import infer_speaker_count
 from utils.transcriber import AudioTranscriber
 from utils.summarizer import ContentSummarizer
+
+# Engines that accept a num_speakers hint
+DIARIZING_ENGINES = {"parakeet-dia"}
 
 ENGINE_DISPLAY = {
     "whisper": "Whisper",
@@ -68,6 +72,7 @@ def process_video(
     transcripts_dir: str = "transcripts",
     summaries_dir: str = "summaries",
     num_speakers: Optional[int] = None,
+    auto_speakers: bool = False,
 ) -> Dict[str, Any]:
     """
     Process a single YouTube video: download, transcribe, and summarize.
@@ -88,6 +93,16 @@ def process_video(
         downloader = YouTubeDownloader(output_dir=downloads_dir)
         video_data = downloader.download_video(url, audio_only=not download_video)
         print(f"{Fore.CYAN}[+] Download complete{Style.RESET_ALL}\n")
+
+        # Optional: infer the speaker count from metadata for diarizing
+        # engines. Gated on high LLM confidence - an explicit --num-speakers
+        # always wins, and no hint at all is the safe fallback.
+        if (auto_speakers and num_speakers is None
+                and transcription_engine in DIARIZING_ENGINES):
+            print(f"{Fore.CYAN}[*] Inferring speaker count from video metadata...{Style.RESET_ALL}")
+            num_speakers = infer_speaker_count(video_data)
+            if num_speakers is None:
+                print(f"{Fore.CYAN}[*] No confident count - diarizing unhinted{Style.RESET_ALL}")
 
         # Step 2: Transcribe
         engine_label = engine_display_name(transcription_engine, whisper_model)
