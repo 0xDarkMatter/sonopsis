@@ -132,6 +132,45 @@ class TestSubapps:
         assert "paths" in envelope["data"]
 
 
+class TestAuthFlows:
+    def test_login_stores_in_keyring(self):
+        with patch("sonopsis.cli.CredentialStore") as store:
+            result = runner.invoke(app, ["auth", "login", "openai", "--key", "sk-x"])
+        assert result.exit_code == 0
+        store.assert_called_once_with("openai")
+        store.return_value.set.assert_called_once_with("sk-x")
+
+    def test_login_prompts_when_key_omitted(self):
+        with patch("sonopsis.cli.CredentialStore") as store:
+            result = runner.invoke(app, ["auth", "login", "openai"],
+                                   input="prompted-key\n")
+        assert result.exit_code == 0
+        store.return_value.set.assert_called_once_with("prompted-key")
+
+    def test_login_keyring_unavailable_maps_to_error_exit(self):
+        with patch("sonopsis.cli.CredentialStore") as store:
+            store.return_value.set.side_effect = RuntimeError("no keyring backend")
+            result = runner.invoke(app, ["auth", "login", "openai", "--key", "x"])
+        assert result.exit_code == 1
+
+    def test_logout_deletes_from_keyring(self):
+        with patch("sonopsis.cli.CredentialStore") as store:
+            store.return_value.delete.return_value = True
+            result = runner.invoke(app, ["auth", "logout", "openai"])
+        assert result.exit_code == 0
+        store.return_value.delete.assert_called_once_with()
+
+    def test_logout_nothing_stored_still_succeeds(self):
+        with patch("sonopsis.cli.CredentialStore") as store:
+            store.return_value.delete.return_value = False
+            result = runner.invoke(app, ["auth", "logout", "openai"])
+        assert result.exit_code == 0
+
+    def test_logout_unknown_provider(self):
+        result = runner.invoke(app, ["auth", "logout", "nonsense"])
+        assert result.exit_code == 4
+
+
 class TestHumanOutputContract:
     """Non-JSON mode: rich UI goes to stderr, stdout stays a clean data
     channel (only artifact paths are ever printed there)."""
