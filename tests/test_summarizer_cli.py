@@ -20,6 +20,82 @@ def _make_summarizer(tmp_path, model="claude-cli"):
         return ContentSummarizer(model=model, output_dir=str(tmp_path))
 
 
+class TestRetryLogic:
+    """_generate_with_retry must retry transient errors and fail fast otherwise."""
+
+    def _summarizer(self, tmp_path):
+        with patch("sonopsis.summarizer.shutil.which", return_value=FAKE_CLI):
+            return ContentSummarizer(model="claude-cli", output_dir=str(tmp_path))
+
+    def test_transient_classification(self):
+        from sonopsis.summarizer import _is_transient
+
+        class RateLimitError(Exception):
+            pass
+
+        class BoringError(Exception):
+            pass
+
+        class WithStatus(Exception):
+            status_code = 529
+
+        class ClientError(Exception):
+            status_code = 400
+
+        assert _is_transient(RateLimitError()) is True
+        assert _is_transient(WithStatus()) is True
+        assert _is_transient(BoringError()) is False
+        assert _is_transient(ClientError()) is False
+
+    def test_retries_transient_then_succeeds(self, tmp_path):
+        s = self._summarizer(tmp_path)
+
+        class OverloadedError(Exception):
+            status_code = 529
+
+        attempts = {"n": 0}
+
+        def flaky(system, prompt):
+            attempts["n"] += 1
+            if attempts["n"] < 3:
+                raise OverloadedError("529")
+            return "the summary"
+
+        with patch.object(s, "_generate_once", side_effect=flaky),              patch("sonopsis.summarizer.time.sleep") as sleep_mock:
+            assert s._generate_with_retry("sys", "prompt") == "the summary"
+        assert attempts["n"] == 3
+        assert sleep_mock.call_count == 2  # backoff between attempts
+
+    def test_non_transient_fails_immediately(self, tmp_path):
+        s = self._summarizer(tmp_path)
+
+        def fatal(system, prompt):
+            raise ValueError("bad request")
+
+        with patch.object(s, "_generate_once", side_effect=fatal),              patch("sonopsis.summarizer.time.sleep") as sleep_mock:
+            with pytest.raises(ValueError):
+                s._generate_with_retry("sys", "prompt")
+        sleep_mock.assert_not_called()
+
+    def test_transient_exhausts_attempts_then_raises(self, tmp_path):
+        from sonopsis.summarizer import MAX_API_ATTEMPTS
+        s = self._summarizer(tmp_path)
+
+        class OverloadedError(Exception):
+            status_code = 503
+
+        calls = {"n": 0}
+
+        def always_down(system, prompt):
+            calls["n"] += 1
+            raise OverloadedError("503")
+
+        with patch.object(s, "_generate_once", side_effect=always_down),              patch("sonopsis.summarizer.time.sleep"):
+            with pytest.raises(OverloadedError):
+                s._generate_with_retry("sys", "prompt")
+        assert calls["n"] == MAX_API_ATTEMPTS
+
+
 class TestClaudeCliDetection:
     def test_available_when_on_path(self):
         with patch("sonopsis.summarizer.shutil.which", return_value=FAKE_CLI):
