@@ -174,7 +174,7 @@ Examples:
   python main.py https://youtu.be/dQw4w9WgXcQ --whisper-model small
 
   # Summarize on your Claude subscription (no API key)
-  python main.py <URL> --gpt-model claude-cli
+  python main.py <URL> --model claude-cli
 
   # Playlist (resumable)
   python main.py "https://www.youtube.com/playlist?list=PLxxxxxxx" --skip-existing
@@ -190,13 +190,14 @@ Examples:
     )
 
     parser.add_argument(
-        "--transcription-engine",
+        "--engine", "--transcription-engine",
+        dest="transcription_engine",
         default=default_engine(defaults.get('transcription_engine')),
         choices=["whisper", "whisperx", "parakeet", "parakeet-dia", "elevenlabs", "openai"],
-        help="Transcription engine: whisper (local, free), whisperx (local + speaker diarization), "
-             "parakeet (local, beats Whisper accuracy, no PyTorch needed), "
-             "elevenlabs (cloud, diarization), openai (cloud gpt-4o-transcribe-diarize) "
-             "(default: %(default)s)"
+        help="Transcription engine: parakeet (local, beats Whisper accuracy, no PyTorch), "
+             "parakeet-dia (local + speaker diarization), whisper (local, robust on bad audio), "
+             "whisperx (local + diarization), elevenlabs (cloud), "
+             "openai (cloud gpt-4o-transcribe-diarize) (default: %(default)s)"
     )
 
     parser.add_argument(
@@ -207,7 +208,8 @@ Examples:
     )
 
     parser.add_argument(
-        "--gpt-model",
+        "--model", "--gpt-model",
+        dest="gpt_model",
         default=default_summary_model,
         help=f"AI model for summarization (default: {default_summary_model}). "
              "Use claude-cli[/sonnet|/opus|/haiku] to summarize via the Claude Code CLI "
