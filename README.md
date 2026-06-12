@@ -11,7 +11,68 @@
 
 **Video/Audio Summariser** - Download · Transcribe · Summarize
 
-A Python application that downloads YouTube videos, transcribes them using OpenAI's Whisper, and generates comprehensive summaries and notes using GPT/Claude models.
+A Python application that downloads YouTube videos, transcribes them across six engines (local and cloud), and generates comprehensive summaries and notes using Claude/GPT models - or your Claude subscription, no API key needed.
+
+## Quick Start
+
+Three steps to your first summary. You need [Python 3.11+](https://www.python.org/downloads/), [uv](https://docs.astral.sh/uv/) and [FFmpeg](https://ffmpeg.org/download.html) (`choco install ffmpeg` / `brew install ffmpeg` / `apt install ffmpeg`).
+
+```bash
+# 1. Get the code and dependencies (incl. the recommended local transcription engine)
+git clone https://github.com/0xDarkMatter/sonopsis && cd sonopsis
+uv sync --extra parakeet
+
+# 2. Pick ONE summarization backend:
+#    - Already use Claude Code (Pro/Max)? Skip this step - it's detected automatically.
+#    - Otherwise: cp .env.example .env  and add OPENAI_API_KEY or ANTHROPIC_API_KEY
+
+# 3. Summarize a video
+uv run python main.py "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+```
+
+Your transcript lands in `transcripts/`, the summary in `summaries/`. Prefer guided menus over flags? Run `uv run python sonopsis.py` instead. Everything else - speaker diarization, engine choices, playlists, custom prompts - is below.
+
+## Recent Updates
+
+**v0.2.0** (June 2026)
+
+*   🚀 **Claude Code CLI summarization** - Summarize on your Claude Pro/Max subscription with no API key: `--model claude-cli` (or `/sonnet`, `/opus`, `/haiku`). Auto-selected as the default whenever the CLI is installed.
+*   🆕 **NVIDIA Parakeet engine, new local default** - TDT 0.6B v3 via onnx-asr: no PyTorch, ~670MB, and 0% WER on clean wideband audio where Whisper scored 3-20% on the project's known-good corpus. `uv sync --extra parakeet`.
+*   🗣️ **Free local speaker diarization** - `parakeet-dia` pairs pyannote speaker turns with Parakeet transcription, beating ElevenLabs on crosstalk (9.0% vs 15.0% DER). `--num-speakers N` sharpens it further; `--auto-speakers` infers the count from video metadata, applied only at high confidence.
+*   🔌 **OpenAI gpt-4o-transcribe-diarize engine** - The best speaker counter measured: 9/9 perfect counts unhinted, including a 5-speaker panel. Reuses your existing `OPENAI_API_KEY`; oversized or rejected uploads auto re-encode to Opus.
+*   🧪 **Benchmark suite with known-good corpora** - WER and DER rubrics against exact-reference audio (31 samples across clean, noisy, narrowband, crosstalk and multi-speaker conditions). Every engine default above is backed by a committed result in `benchmarks/`, not a leaderboard claim.
+*   ⚡ **Silence-aligned chunking** - Long-audio chunk boundaries snap to detected silences instead of cutting mid-word; a forced-boundary stress test went from 43.4% WER to 0.0%.
+*   🔧 **Quality-of-life overhaul** - `config.yaml` is actually loaded now, playlists resume with `--skip-existing`, menus work beyond Windows, transient API errors retry, flags got shorter (`--engine`, `--model`; old spellings still work), and the suite grew from 44 to 127 tests plus gated e2e runs against real backends.
+
+[View full changelog →](CHANGELOG.md)
+
+## Which Engine & Model Should I Use?
+
+Picks below are backed by the measured results in [`benchmarks/`](benchmarks/).
+
+**Transcription** (`--engine`):
+
+| Your situation | Use | Why |
+|---|---|---|
+| Default / best free accuracy | `parakeet` | 0% WER on clean wideband in the project corpus; no PyTorch, CPU-friendly |
+| Interview or podcast, want speaker labels, free | `parakeet-dia` | Free local diarization; add `--num-speakers 2` or `--auto-speakers` |
+| Panel with 3-5+ speakers | `openai` | Best speaker counting measured: 9/9 perfect, unhinted |
+| Heavy crosstalk / people talking over each other | `parakeet-dia` | Best overlap handling measured (9.0% DER) |
+| Clickable YouTube timestamp bookmarks in summaries | `elevenlabs` | Word-level timestamps + audio events; 2.5h/month free tier |
+| Phone-quality, archival or noisy-telephony audio | `whisper` | Most robust engine on genuinely degraded recordings |
+| Non-European languages | `elevenlabs` | 99 languages (Parakeet covers 25 European) |
+| No local installs at all | `elevenlabs` or `openai` | Cloud-only; core install stays ~50MB |
+
+**Summarization** (`--model`):
+
+| Your situation | Use | Why |
+|---|---|---|
+| Claude Pro/Max subscriber | `claude-cli` | No API key, no per-token cost (default when installed) |
+| Highest quality summary | `claude-cli/opus` or `claude-opus-4-8` | Most capable Claude |
+| Best API quality/cost balance | `claude-sonnet-4-6` | Default API model |
+| Cheapest | `claude-haiku-4-5-20251001` or `gpt-4o-mini` | ~$0.05-0.08 per 3-hour video |
+| Very long (multi-hour) transcripts | `openrouter/moonshot/kimi-k2` | 200K+ context specialist |
+| Chinese / multilingual content | `openrouter/zhipuai/glm-4.6-plus` | Strongest multilingual option |
 
 ## Features
 
@@ -66,7 +127,9 @@ sudo apt install ffmpeg  # Ubuntu/Debian
 sudo yum install ffmpeg  # CentOS/RHEL
 ```
 
-## Installation
+## Advanced Setup & Configuration
+
+Everything past the Quick Start: engine packs, API keys, and per-project defaults.
 
 1. **Clone or download this repository**
 
@@ -126,20 +189,6 @@ HF_TOKEN=your_huggingface_token_here
 - OpenAI: https://platform.openai.com/api-keys
 - ElevenLabs: https://elevenlabs.io (sign up and get API key from dashboard)
 - Hugging Face: https://huggingface.co/settings/tokens (for WhisperX speaker diarization)
-
-## Recent Updates
-
-**v0.2.0** (June 2026)
-
-*   🚀 **Claude Code CLI summarization** - Summarize on your Claude Pro/Max subscription with no API key: `--model claude-cli` (or `/sonnet`, `/opus`, `/haiku`). Auto-selected as the default whenever the CLI is installed.
-*   🆕 **NVIDIA Parakeet engine, new local default** - TDT 0.6B v3 via onnx-asr: no PyTorch, ~670MB, and 0% WER on clean wideband audio where Whisper scored 3-20% on the project's known-good corpus. `uv sync --extra parakeet`.
-*   🗣️ **Free local speaker diarization** - `parakeet-dia` pairs pyannote speaker turns with Parakeet transcription, beating ElevenLabs on crosstalk (9.0% vs 15.0% DER). `--num-speakers N` sharpens it further; `--auto-speakers` infers the count from video metadata, applied only at high confidence.
-*   🔌 **OpenAI gpt-4o-transcribe-diarize engine** - The best speaker counter measured: 9/9 perfect counts unhinted, including a 5-speaker panel. Reuses your existing `OPENAI_API_KEY`; oversized or rejected uploads auto re-encode to Opus.
-*   🧪 **Benchmark suite with known-good corpora** - WER and DER rubrics against exact-reference audio (31 samples across clean, noisy, narrowband, crosstalk and multi-speaker conditions). Every engine default above is backed by a committed result in `benchmarks/`, not a leaderboard claim.
-*   ⚡ **Silence-aligned chunking** - Long-audio chunk boundaries snap to detected silences instead of cutting mid-word; a forced-boundary stress test went from 43.4% WER to 0.0%.
-*   🔧 **Quality-of-life overhaul** - `config.yaml` is actually loaded now, playlists resume with `--skip-existing`, menus work beyond Windows, transient API errors retry, flags got shorter (`--engine`, `--model`; old spellings still work), and the suite grew from 44 to 127 tests plus gated e2e runs against real backends.
-
-[View full changelog →](CHANGELOG.md)
 
 ## Project Structure
 
