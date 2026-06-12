@@ -2,6 +2,9 @@
 Tests for YouTubeDownloader URL handling (no network access).
 """
 
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from sonopsis.downloader import YouTubeDownloader
@@ -46,3 +49,89 @@ class TestExtractVideoId:
     ])
     def test_extract(self, url, expected):
         assert YouTubeDownloader._extract_video_id(url) == expected
+
+
+class TestBuildMetadata:
+    URL = "https://youtu.be/dQw4w9WgXcQ"
+
+    def _build(self, info):
+        return YouTubeDownloader._build_metadata(info, Path("a.mp3"), self.URL)
+
+    def test_sparse_info_gets_safe_defaults(self):
+        meta = self._build({})
+        assert meta["title"] == "Unknown"
+        assert meta["duration"] == 0
+        assert meta["tags"] == []
+        assert meta["reused_existing"] is False
+        assert meta["audio_file"] == "a.mp3"
+        assert meta["url"] == self.URL
+
+    def test_none_title_falls_back_to_video(self):
+        """yt-dlp can return an explicit None title; .encode would raise."""
+        meta = self._build({"title": None})
+        assert meta["title"] == "Video"
+
+    def test_unencodable_title_falls_back_to_video(self):
+        meta = self._build({"title": "bad \ud800 surrogate"})
+        assert meta["title"] == "Video"
+
+
+class TestExistingFileReuse:
+    URL = "https://youtu.be/dQw4w9WgXcQ"
+
+    def test_non_tty_auto_reuses_existing_audio(self, tmp_path):
+        """Unattended runs (cron, CI) must reuse cached audio, never block."""
+        existing = tmp_path / "YT_dQw4w9WgXcQ_Title.mp3"
+        existing.write_bytes(b"x")
+        dl = YouTubeDownloader(output_dir=str(tmp_path))
+
+        ydl = MagicMock()
+        ydl.__enter__ = lambda s: s
+        ydl.__exit__ = MagicMock(return_value=False)
+        ydl.extract_info.return_value = {"title": "Title"}
+
+        with patch("sonopsis.downloader.sys.stdin") as stdin, \
+             patch("sonopsis.downloader.yt_dlp.YoutubeDL", return_value=ydl):
+            stdin.isatty.return_value = False
+            result = dl.download_video(self.URL)
+
+        assert result["reused_existing"] is True
+        assert result["audio_file"] == str(existing)
+        ydl.extract_info.assert_called_once_with(self.URL, download=False)
+
+    def test_invalid_url_raises_before_any_download(self, tmp_path):
+        dl = YouTubeDownloader(output_dir=str(tmp_path))
+        with pytest.raises(Exception, match="Could not extract video ID"):
+            dl.download_video("https://example.com/not-youtube")
+
+
+class TestGetPlaylistVideos:
+    URL = "https://www.youtube.com/playlist?list=PLx"
+
+    def _ydl(self, playlist_info):
+        ydl = MagicMock()
+        ydl.__enter__ = lambda s: s
+        ydl.__exit__ = MagicMock(return_value=False)
+        ydl.extract_info.return_value = playlist_info
+        return ydl
+
+    def test_none_entries_filtered(self, tmp_path):
+        """Deleted/private playlist items come back as None - skip them."""
+        info = {"entries": [
+            {"id": "a" * 11, "title": "A", "duration": 1},
+            None,
+            {"id": "b" * 11},  # missing title/duration
+        ]}
+        dl = YouTubeDownloader(output_dir=str(tmp_path))
+        with patch("sonopsis.downloader.yt_dlp.YoutubeDL", return_value=self._ydl(info)):
+            videos = dl.get_playlist_videos(self.URL)
+        assert len(videos) == 2
+        assert videos[0]["url"].endswith("a" * 11)
+        assert videos[1]["title"] == "Unknown"
+        assert videos[1]["duration"] == 0
+
+    def test_missing_entries_key_raises(self, tmp_path):
+        dl = YouTubeDownloader(output_dir=str(tmp_path))
+        with patch("sonopsis.downloader.yt_dlp.YoutubeDL", return_value=self._ydl({})):
+            with pytest.raises(Exception, match="No videos found"):
+                dl.get_playlist_videos(self.URL)
