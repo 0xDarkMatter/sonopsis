@@ -119,3 +119,50 @@ class TestSummarizeFlow:
             with pytest.raises(Exception, match="Summarization failed: api down"):
                 s.summarize("text", self._metadata())
         assert list(tmp_path.glob("*_summary.md")) == []  # no partial output
+
+
+class TestFormatOutputHeader:
+    URL = "https://youtu.be/dQw4w9WgXcQ"
+
+    def _formatted(self, tmp_path, monkeypatch, **meta_extra):
+        monkeypatch.setenv("OPENAI_API_KEY", "k")
+        s = ContentSummarizer(model="gpt-4o-mini", output_dir=str(tmp_path))
+        s.transcription_engine = "whisper"
+        meta = {"title": "T", "uploader": "U", "duration": 60, "url": self.URL}
+        meta.update(meta_extra)
+        return s._format_output("THE BODY", meta)
+
+    def test_upload_date_reformatted(self, tmp_path, monkeypatch):
+        out = self._formatted(tmp_path, monkeypatch, upload_date="20260115")
+        assert "**Published:** 2026-01-15" in out
+
+    def test_unknown_upload_date_left_alone(self, tmp_path, monkeypatch):
+        out = self._formatted(tmp_path, monkeypatch)
+        assert "**Published:** Unknown" in out
+
+    def test_engagement_section_omitted_when_zero(self, tmp_path, monkeypatch):
+        out = self._formatted(tmp_path, monkeypatch, view_count=0, like_count=0)
+        assert "Engagement Metrics" not in out
+
+    def test_engagement_counts_formatted_with_commas(self, tmp_path, monkeypatch):
+        out = self._formatted(tmp_path, monkeypatch, view_count=1234567)
+        assert "**Views:** 1,234,567" in out
+
+    def test_tags_capped_at_twenty(self, tmp_path, monkeypatch):
+        out = self._formatted(tmp_path, monkeypatch,
+                              tags=[f"t{i}" for i in range(25)])
+        assert "(+5 more)" in out
+        assert "t19" in out and "t20" not in out
+
+    def test_chapters_listed_with_timestamps(self, tmp_path, monkeypatch):
+        out = self._formatted(tmp_path, monkeypatch, chapters=[
+            {"start_time": 0, "title": "Intro"},
+            {"start_time": 65, "title": "Main"},
+        ])
+        assert "**Chapters:** 2 detected" in out
+        assert "`00:01:05` Main" in out
+
+    def test_summary_body_appended_after_header(self, tmp_path, monkeypatch):
+        out = self._formatted(tmp_path, monkeypatch)
+        assert out.endswith("THE BODY")
+        assert out.index("Processing Information") < out.index("THE BODY")
